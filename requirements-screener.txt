@@ -1,0 +1,2 @@
+yfinance==1.7.0
+exchange-calendars==4.13.2
