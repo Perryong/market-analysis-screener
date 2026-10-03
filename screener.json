@@ -1,7 +1,7 @@
 {
   "stocks": {
     "enabled": true,
-    "provider": "yfinance",
+    "provider": "alpaca",
     "environment": "paper",
     "feed": "sip",
     "symbols": [

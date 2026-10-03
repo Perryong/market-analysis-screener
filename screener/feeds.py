@@ -123,7 +123,10 @@ class MarketData:
         start = datetime.fromtimestamp(start, NY).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
         rows, token, seen = [], None, set()
         while True:
-            params = dict(symbols=symbol, timeframe='30Min', start=iso(start), end=iso(self.now),
+            # SIP on free/paper accounts is 15-min delayed; querying end=now 403s
+            # ("subscription does not permit querying recent SIP data"). Shift end back
+            # one delay window so the fetch stays entitled; completed bars are unaffected.
+            params = dict(symbols=symbol, timeframe='30Min', start=iso(start), end=iso(self.now - 900),
                           adjustment='split', feed=feed, limit=10000, sort='asc')
             if token:
                 params['page_token'] = token
@@ -154,8 +157,10 @@ class MarketData:
         # Quote access can differ from historical-data entitlement. Keep setups visible.
         quote, quote_error = None, None
         try:
+            # SIP "latest" quotes 403 on delayed-data subscriptions; IEX quotes are
+            # available and real-time on the free tier, so use IEX for the quote.
             r = get_json('https://data.alpaca.markets/v2/stocks/quotes/latest',
-                         {'symbols':symbol, 'feed':feed}, self.headers)['quotes'][symbol]
+                         {'symbols':symbol, 'feed':'iex'}, self.headers)['quotes'][symbol]
             bid, ask = float(r['bp']), float(r['ap'])
             if not 0 < bid <= ask:
                 raise DataError('Invalid stock quote')
