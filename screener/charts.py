@@ -101,7 +101,7 @@ def select(results, crypto_pct, stock_pct, metal_pct, cap=CAP):
                 pct = stock_pct.get(sym, 0.0)
             else:
                 pct = metal_pct.get(sym, 0.0)
-            active.append((market, sym, pct, r.get("status"), r.get("side")))
+            active.append((market, sym, pct, r.get("status"), r.get("side"), r))
     active.sort(key=lambda x: -abs(x[2]))
     picks = active[:cap]
     if len(picks) < cap:
@@ -115,7 +115,7 @@ def select(results, crypto_pct, stock_pct, metal_pct, cap=CAP):
                 break
             if (m, s) in seen:
                 continue
-            picks.append((m, s, p, "mover", None))
+            picks.append((m, s, p, "mover", None, results.get((m, s))))
             seen.add((m, s))
     return picks
 
@@ -150,7 +150,7 @@ def stock_bars(symbol, headers, now, days=5):
     ]
 
 
-def render(bars, symbol):
+def render(bars, symbol, signal=None):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -167,8 +167,7 @@ def render(bars, symbol):
     mc = mpf.make_marketcolors(up="#26a69a", down="#ef5350", edge="inherit", wick="inherit", volume="inherit")
     style = mpf.make_mpf_style(marketcolors=mc, gridstyle=":", y_on_right=False)
     buf = io.BytesIO()
-    mpf.plot(
-        df,
+    plot_kwargs = dict(
         type="candle",
         style=style,
         volume=False,
@@ -178,8 +177,52 @@ def render(bars, symbol):
         tight_layout=True,
         savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
     )
+    if signal and signal.get("entry"):
+        side = signal.get("side")
+        action = "BUY" if side == "LONG" else "SELL"
+        active = signal.get("status") in ACTIVE
+        lines = [signal["entry"]]
+        colors = ["#26a69a" if side == "LONG" else "#ef5350"]
+        if active:
+            if signal.get("stop"):
+                lines.append(signal["stop"])
+                colors.append("#ef5350")
+            if signal.get("target"):
+                lines.append(signal["target"])
+                colors.append("#26a69a")
+            plot_kwargs["title"] = f"{symbol} · {action} {signal['entry']:.2f}"
+        else:
+            plot_kwargs["title"] = f"{symbol} · watch {action} @ {signal['entry']:.2f}"
+        plot_kwargs["hlines"] = dict(
+            hlines=lines, colors=colors, linestyle="--", linewidths=[1.1] * len(lines)
+        )
+    mpf.plot(df, **plot_kwargs)
     buf.seek(0)
     return buf.read(), float(last["Close"]), float(pct)
+
+
+def signal_of(r):
+    if not r:
+        return None
+    return dict(status=r.get("status"), side=r.get("side"),
+                entry=r.get("plan_entry"), stop=r.get("plan_stop"),
+                target=r.get("plan_target"))
+
+
+def caption(symbol, tag, sig, last, pct):
+    base = f"{symbol} · {tag}"
+    if sig and sig.get("entry"):
+        side = sig.get("side")
+        action = "BUY" if side == "LONG" else "SELL"
+        if sig.get("status") in ACTIVE:
+            base += f" · {action} entry {_fmt(sig['entry'])}"
+            if sig.get("stop"):
+                base += f" · stop {_fmt(sig['stop'])}"
+            if sig.get("target"):
+                base += f" · target {_fmt(sig['target'])}"
+        else:
+            base += f" · watch {action} @ {_fmt(sig['entry'])}"
+    return f"{base} · 15m · {_fmt(last)} · {pct:+.2f}%"
 
 
 def dashboard_url():
@@ -210,7 +253,7 @@ def run(config, store, now):
     if not picks:
         raise DataError("No movers or active signals to chart")
     failures = []
-    for market, symbol, pct, tag, side in picks:
+    for market, symbol, pct, tag, side, r in picks:
         try:
             if market == "crypto":
                 bars = crypto_bars(symbol)
@@ -221,11 +264,12 @@ def run(config, store, now):
             if len(bars) < 2:
                 failures.append(f"{symbol}: no bars")
                 continue
-            png, last, chart_pct = render(bars, symbol)
+            sig = signal_of(r)
+            png, last, chart_pct = render(bars, symbol, sig)
         except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
             failures.append(f"{symbol}: {exc}")
             continue
-        label = f"{symbol} · {tag} · 15m · {_fmt(last)} · {chart_pct:+.2f}%"
+        label = caption(symbol, tag, sig, last, chart_pct)
         send(token, chat, label, png)
     summary = "SCREENER · 15m movers"
     link = dashboard_url()
