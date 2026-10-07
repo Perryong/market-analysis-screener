@@ -14,6 +14,7 @@ from pathlib import Path
 from .shared import DataError, get_json, iso, send, timestamp
 
 BINANCE = "https://data-api.binance.vision/api/v3"
+OANDA_BASE = "https://api-fxpractice.oanda.com"
 ACTIVE = ("CONFIRMED", "DEVELOPING", "RETESTED")
 CAP = 8  # max charts per run
 
@@ -32,7 +33,7 @@ def results(store):
     out = {}
     for key, raw in store.db.execute("SELECT key, value FROM kv WHERE key LIKE 'result:%'"):
         parts = key.split(":")
-        if len(parts) == 3 and parts[1] in ("stocks", "crypto"):
+        if len(parts) == 3 and parts[1] in ("stocks", "crypto", "metals"):
             out[(parts[1], parts[2])] = json.loads(raw)
     return out
 
@@ -59,11 +60,47 @@ def stock_movers(symbols, headers):
     return out
 
 
-def select(results, crypto_pct, stock_pct, cap=CAP):
+def metal_movers(symbols, headers):
+    out = {}
+    for sym in symbols:
+        instrument = sym[:3] + "_" + sym[3:]
+        try:
+            raw = get_json(
+                OANDA_BASE + "/v3/instruments/" + instrument + "/candles",
+                {"granularity": "H1", "count": 25, "price": "M"},
+                headers,
+            )
+            closes = [float(c["mid"]["c"]) for c in raw["candles"] if c.get("complete")]
+            out[sym] = (closes[-1] - closes[0]) / closes[0] * 100 if len(closes) >= 2 else 0.0
+        except (DataError, KeyError, TypeError, ValueError):
+            out[sym] = 0.0
+    return out
+
+
+def metal_bars(symbol, headers, limit=192):
+    instrument = symbol[:3] + "_" + symbol[3:]
+    raw = get_json(
+        OANDA_BASE + "/v3/instruments/" + instrument + "/candles",
+        {"granularity": "M15", "count": limit, "price": "M"},
+        headers,
+    )
+    return [
+        dict(t=timestamp(c["time"]), o=float(c["mid"]["o"]), h=float(c["mid"]["h"]),
+             l=float(c["mid"]["l"]), c=float(c["mid"]["c"]), v=float(c["volume"]))
+        for c in raw["candles"]
+    ]
+
+
+def select(results, crypto_pct, stock_pct, metal_pct, cap=CAP):
     active = []
     for (market, sym), r in results.items():
         if r.get("status") in ACTIVE:
-            pct = crypto_pct.get(sym, 0.0) if market == "crypto" else stock_pct.get(sym, 0.0)
+            if market == "crypto":
+                pct = crypto_pct.get(sym, 0.0)
+            elif market == "stocks":
+                pct = stock_pct.get(sym, 0.0)
+            else:
+                pct = metal_pct.get(sym, 0.0)
             active.append((market, sym, pct, r.get("status"), r.get("side")))
     active.sort(key=lambda x: -abs(x[2]))
     picks = active[:cap]
@@ -71,6 +108,7 @@ def select(results, crypto_pct, stock_pct, cap=CAP):
         seen = {(m, s) for m, s, *_ in picks}
         movers = [("crypto", s, p) for s, p in crypto_pct.items()]
         movers += [("stocks", s, p) for s, p in stock_pct.items()]
+        movers += [("metals", s, p) for s, p in metal_pct.items()]
         movers.sort(key=lambda x: -abs(x[2]))
         for m, s, p in movers:
             if len(picks) >= cap:
@@ -162,17 +200,24 @@ def run(config, store, now):
         "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID"),
         "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY"),
     }
+    oanda_headers = {"Authorization": "Bearer " + os.getenv("OANDA_API_TOKEN", "")}
     picks = select(
         results(store),
         crypto_movers(config["crypto"]["symbols"]),
         stock_movers(config["stocks"]["symbols"], headers),
+        metal_movers(config["metals"]["symbols"], oanda_headers),
     )
     if not picks:
         raise DataError("No movers or active signals to chart")
     failures = []
     for market, symbol, pct, tag, side in picks:
         try:
-            bars = crypto_bars(symbol) if market == "crypto" else stock_bars(symbol, headers, now)
+            if market == "crypto":
+                bars = crypto_bars(symbol)
+            elif market == "stocks":
+                bars = stock_bars(symbol, headers, now)
+            else:
+                bars = metal_bars(symbol, oanda_headers)
             if len(bars) < 2:
                 failures.append(f"{symbol}: no bars")
                 continue

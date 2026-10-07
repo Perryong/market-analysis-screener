@@ -159,7 +159,7 @@ def render(payload):
     rows = []
     for r in results:
         state = r['status']
-        tv = ('BINANCE:' if r['market']=='crypto' else '')+r['symbol']
+        tv = ('BINANCE:' if r['market']=='crypto' else 'OANDA:' if r['market']=='metals' else '')+r['symbol']
         reasons = ', '.join(r.get('reasons',[])) or 'Conditions evaluated from completed candles'
         rr = (number(r['net_rr'])+' net R:R' if r.get('net_rr') is not None else
               number(r['plan_rr'])+' gross R:R, planned' if r.get('plan_rr') is not None else '— net R:R')
@@ -191,12 +191,12 @@ header{{display:flex;justify-content:space-between;align-items:start;gap:20px}}h
 tbody.long td:first-child{{box-shadow:inset 3px 0 var(--green)}}tbody.short td:first-child{{box-shadow:inset 3px 0 var(--red)}}
 .regime.bullish{{color:var(--green)}}.regime.bearish{{color:var(--red)}}.regime.neutral,.regime.unknown{{color:var(--muted)}}td small.stop,td small.stop .plan{{color:var(--red)}}.target{{color:var(--green)}}.checks{{list-style:none;padding:0;margin:10px 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 16px}}.check.pass{{color:var(--green)}}.check.fail{{color:var(--red)}}.check.pending{{color:var(--muted)}}.verdict{{color:var(--text)}}.tablewrap+.stats{{margin-top:14px}}.plan{{font-style:normal;font-size:10px;color:var(--muted);margin-left:4px}}
 @media(max-width:700px){{main{{padding:22px 14px}}header{{display:block}}.stamp{{text-align:left}}h1{{font-size:28px}}.stats{{grid-template-columns:repeat(2,1fr)}}}}
-</style></head><body><main><header><div><div class="eyebrow">MARKET WATCH / RESEARCH DESK</div><h1>Breakout & breakdown screener</h1><p>Daily stocks · 4H crypto · 1H retests</p></div><div class="stamp">{stamp(payload['generated_at'])}<br><a href="latest.json">Download evidence JSON ↗</a></div></header>
+</style></head><body><main><header><div><div class="eyebrow">MARKET WATCH / RESEARCH DESK</div><h1>Breakout & breakdown screener</h1><p>Daily stocks · 4H crypto &amp; metals · 1H retests</p></div><div class="stamp">{stamp(payload['generated_at'])}<br><a href="latest.json">Download evidence JSON ↗</a></div></header>
 <div class="notice">{title}. Regime guides ranking; scores are not win probabilities. Costs must be configured before entry eligibility.</div>
 {'<div class="notice">Stocks use Yahoo research candles. No verified executable quotes: stock entry eligibility and new paper entries are blocked.</div>' if any('Yahoo Finance' in r.get('source','') for r in results) else ''}
 <section class="stats" aria-label="Scan summary">{''.join(f'<div class="stat"><strong>{n}</strong><span>{e(s.replace("_"," ").title())}</span></div>' for s,n in counts.items())}</section>
 <div class="filters"><label>Symbol<input id="search" type="search" placeholder="Search symbol"></label>
-<label>Market<select id="market"><option value="">All markets</option><option>stocks</option><option>crypto</option></select></label>
+<label>Market<select id="market"><option value="">All markets</option><option>stocks</option><option>crypto</option><option>metals</option></select></label>
 <label>State<select id="status"><option value="">All states</option>{''.join(f'<option>{e(s)}</option>' for s in sorted(set(r['status'] for r in results)))}</select></label>
 <label>Regime<select id="regime"><option value="">All regimes</option><option>BULLISH</option><option>BEARISH</option><option>NEUTRAL</option><option>UNKNOWN</option></select></label>
 <label>Side<select id="side"><option value="">All sides</option><option value="LONG">Long</option><option value="SHORT">Short</option></select></label></div>

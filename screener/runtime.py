@@ -19,15 +19,16 @@ def default_config():
         stocks=dict(enabled=True, provider='yfinance', environment='paper', feed='sip',
                     symbols='AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO AMD NFLX CRM ORCL ADBE INTC MU QCOM AMAT JPM BAC GS V MA WMT COST HD UNH JNJ LLY ABBV XOM CVX CAT GE BA UBER PLTR COIN HOOD SHOP SPY QQQ'.split()),
         crypto=dict(enabled=True, symbols='BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT DOGEUSDT ADAUSDT LINKUSDT AVAXUSDT SUIUSDT LTCUSDT BCHUSDT DOTUSDT UNIUSDT NEARUSDT AAVEUSDT TRXUSDT ATOMUSDT FILUSDT ARBUSDT OPUSDT INJUSDT HBARUSDT XLMUSDT ETCUSDT ICPUSDT RENDERUSDT TAOUSDT PEPEUSDT'.split()),
+        metals=dict(enabled=True, symbols=['XAUUSD', 'XAGUSD']),
         strategy=dict(engine.DEFAULTS),
         paper=dict(enabled=True, capital=10000, risk_fraction=.0025,
                    max_notional_fraction=.1, max_total_fraction=.3))
 
 
 def validate_config(config):
-    if set(config) != {'stocks','crypto','strategy','paper'}:
-        raise DataError('Config requires stocks, crypto, strategy and paper sections')
-    for market in ('stocks','crypto'):
+    if set(config) != {'stocks','crypto','metals','strategy','paper'}:
+        raise DataError('Config requires stocks, crypto, metals, strategy and paper sections')
+    for market in ('stocks','crypto','metals'):
         c = config[market]
         if type(c['enabled']) is not bool or not isinstance(c['symbols'], list) or not c['symbols']:
             raise DataError('Each market needs enabled and a nonempty symbol list')
@@ -140,7 +141,7 @@ def process(store, bundle, settings, paper, now):
                     quantity = math.floor(quantity)
                 if quantity > 0:
                     trade = dict(id=ident,key=key, symbol=bundle['symbol'],market=bundle['market'],
-                                 currency='USD' if bundle['market']=='stocks' else 'USDT',
+                                 currency='USD' if bundle['market'] in ('stocks','metals') else 'USDT',
                                  status='OPEN',entry=result['entry'],entry_at=now,
                                  stop=result['stop'],target=result['target'],quantity=quantity,
                                  last_end=bundle['hourly'][-1]['end'],cost_bps=settings['round_trip_cost_bps'],
@@ -161,7 +162,7 @@ def process(store, bundle, settings, paper, now):
 def scan(store, config, now, scheduled=False, only=None):
     data = feeds.MarketData(config,Cache(store),now)
     errors, updates = [], 0
-    for market in ('stocks','crypto'):
+    for market in ('stocks','crypto','metals'):
         if not config[market]['enabled'] or (only and market != only):
             continue
         try:
@@ -176,7 +177,12 @@ def scan(store, config, now, scheduled=False, only=None):
             store.put('job:'+market, dict(last,attempt=now))
             full_scan = not scheduled or last.get('full_done',0) < (full_due or 0)
             try:
-                benchmark = data.stock('SPY')['setup'] if market=='stocks' else data.crypto('BTCUSDT',daily=True)
+                if market == 'stocks':
+                    benchmark = data.stock('SPY')['setup']
+                elif market == 'crypto':
+                    benchmark = data.crypto('BTCUSDT', daily=True)
+                else:
+                    benchmark = data.metal('XAUUSD')['setup']
                 context = engine.regime(benchmark)
             except (DataError,KeyError,TypeError,ValueError,IndexError):
                 context = 'UNKNOWN'
@@ -195,7 +201,7 @@ def scan(store, config, now, scheduled=False, only=None):
                     any(t['key']==key and t['status']=='OPEN' for t in store.trades())):
                     continue
                 try:
-                    bundle = data.stock(symbol) if market=='stocks' else data.crypto(symbol)
+                    bundle = data.stock(symbol) if market=='stocks' else (data.crypto(symbol) if market=='crypto' else data.metal(symbol))
                     bundle['regime'] = context
                     bundle['benchmark'] = benchmark
                     checked = max(now,time.time())

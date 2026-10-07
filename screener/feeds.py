@@ -9,6 +9,7 @@ from .engine import validate, regime
 
 NY = ZoneInfo('America/New_York')
 BINANCE = 'https://data-api.binance.vision/api/v3'
+OANDA_BASE = 'https://api-fxpractice.oanda.com'
 
 
 def aggregate(bars):
@@ -58,8 +59,26 @@ def crypto_bars(rows, duration, now):
     return result
 
 
+def metal_bars(rows, duration, now):
+    result = []
+    for c in rows:
+        t = timestamp(c['time'])
+        if c.get('complete') is False:
+            continue
+        if t + duration > now:
+            continue
+        result.append(dict(start=t, end=t + duration,
+                           open=float(c['mid']['o']), high=float(c['mid']['h']),
+                           low=float(c['mid']['l']), close=float(c['mid']['c']),
+                           volume=float(c['volume'])))
+    validate(result, now)
+    if not result:
+        raise DataError('Missing metals candles')
+    return result
+
+
 def slot(market, now, sessions, active=False):
-    if market == 'crypto':
+    if market in ('crypto', 'metals'):
         interval, grace = (300, 0) if active else (3600, 180)
         return (int(now)-grace)//interval*interval+grace
     today = datetime.fromtimestamp(now, NY).date()
@@ -192,3 +211,25 @@ class MarketData:
         return dict(symbol=symbol, market='crypto', source='Binance spot / UTC',
                     setup=bars[0], hourly=bars[1], quote=dict(price=float(r['lastPrice']), time=float(r['closeTime'])/1000),
                     market_open=True)
+
+    def metal(self, symbol):
+        token = os.getenv('OANDA_API_TOKEN')
+        if not token:
+            raise DataError('Set OANDA_API_TOKEN for metals data')
+        headers = {'Authorization': 'Bearer ' + token}
+        instrument = symbol[:3] + '_' + symbol[3:]
+        bars = []
+        for gran, duration in (('H4', 14400), ('H1', 3600)):
+            key = 'oanda:' + symbol + ':' + gran
+            saved = self.cache.get(key, {})
+            end = int(self.now) // duration * duration
+            if saved.get('end') != end:
+                raw = get_json(OANDA_BASE + '/v3/instruments/' + instrument + '/candles',
+                               {'granularity': gran, 'count': 250, 'price': 'M'}, headers)
+                saved = dict(end=end, rows=metal_bars(raw['candles'], duration, self.now))
+                self.cache[key] = saved
+            bars.append(saved['rows'])
+        last = bars[1][-1] if bars[1] else None
+        quote = dict(price=last['close'], time=last['end']) if last else None
+        return dict(symbol=symbol, market='metals', source='OANDA practice / UTC',
+                    setup=bars[0], hourly=bars[1], quote=quote, market_open=True)
