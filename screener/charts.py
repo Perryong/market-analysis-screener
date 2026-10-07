@@ -1,0 +1,191 @@
+"""Render live 15-minute candlestick charts for top movers and send to Telegram.
+
+Read-only: reads the screener journal for active signals, ranks symbols by recent
+% move, fetches 15-minute candles (Binance for crypto, Alpaca IEX for stocks),
+renders candlestick PNGs with mplfinance, and sends them to the configured
+Telegram chat along with the current dashboard link. No broker orders.
+"""
+import io
+import json
+import os
+import re
+from pathlib import Path
+
+from .shared import DataError, get_json, iso, send, timestamp
+
+BINANCE = "https://data-api.binance.vision/api/v3"
+ACTIVE = ("CONFIRMED", "DEVELOPING", "RETESTED")
+CAP = 8  # max charts per run
+
+
+def _fmt(x):
+    if x >= 1000:
+        return f"{x:,.1f}"
+    if x >= 1:
+        return f"{x:,.2f}"
+    if x >= 0.01:
+        return f"{x:.4f}"
+    return f"{x:.6f}"
+
+
+def results(store):
+    out = {}
+    for key, raw in store.db.execute("SELECT key, value FROM kv WHERE key LIKE 'result:%'"):
+        parts = key.split(":")
+        if len(parts) == 3 and parts[1] in ("stocks", "crypto"):
+            out[(parts[1], parts[2])] = json.loads(raw)
+    return out
+
+
+def crypto_movers(symbols):
+    rows = get_json(BINANCE + "/ticker/24hr", {"symbols": json.dumps(symbols, separators=(",", ":"))})
+    return {r["symbol"]: float(r["priceChangePercent"]) for r in rows}
+
+
+def stock_movers(symbols, headers):
+    rows = get_json(
+        "https://data.alpaca.markets/v2/stocks/snapshots",
+        {"symbols": ",".join(symbols), "feed": "iex"},
+        headers,
+    )
+    out = {}
+    for sym, snap in rows.items():
+        try:
+            prev = float(snap["prevDailyBar"]["c"])
+            last = float(snap["latestTrade"]["p"])
+            out[sym] = (last - prev) / prev * 100 if prev else 0.0
+        except (KeyError, TypeError, ValueError):
+            out[sym] = 0.0
+    return out
+
+
+def select(results, crypto_pct, stock_pct, cap=CAP):
+    active = []
+    for (market, sym), r in results.items():
+        if r.get("status") in ACTIVE:
+            pct = crypto_pct.get(sym, 0.0) if market == "crypto" else stock_pct.get(sym, 0.0)
+            active.append((market, sym, pct, r.get("status"), r.get("side")))
+    active.sort(key=lambda x: -abs(x[2]))
+    picks = active[:cap]
+    if len(picks) < cap:
+        seen = {(m, s) for m, s, *_ in picks}
+        movers = [("crypto", s, p) for s, p in crypto_pct.items()]
+        movers += [("stocks", s, p) for s, p in stock_pct.items()]
+        movers.sort(key=lambda x: -abs(x[2]))
+        for m, s, p in movers:
+            if len(picks) >= cap:
+                break
+            if (m, s) in seen:
+                continue
+            picks.append((m, s, p, "mover", None))
+            seen.add((m, s))
+    return picks
+
+
+def crypto_bars(symbol, limit=192):
+    rows = get_json(BINANCE + "/klines", {"symbol": symbol, "interval": "15m", "limit": limit})
+    return [
+        dict(t=int(r[0]) / 1000, o=float(r[1]), h=float(r[2]), l=float(r[3]), c=float(r[4]), v=float(r[5]))
+        for r in rows
+    ]
+
+
+def stock_bars(symbol, headers, now, days=5):
+    payload = get_json(
+        "https://data.alpaca.markets/v2/stocks/bars",
+        dict(
+            symbols=symbol,
+            timeframe="15Min",
+            start=iso(now - days * 86400),
+            end=iso(now),
+            adjustment="split",
+            feed="iex",
+            limit=10000,
+            sort="asc",
+        ),
+        headers,
+    )
+    rows = payload.get("bars", {}).get(symbol, [])
+    return [
+        dict(t=timestamp(r["t"]), o=float(r["o"]), h=float(r["h"]), l=float(r["l"]), c=float(r["c"]), v=float(r["v"]))
+        for r in rows
+    ]
+
+
+def render(bars, symbol):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import mplfinance as mpf
+    import pandas as pd
+
+    df = pd.DataFrame(bars)
+    df["Date"] = pd.to_datetime(df["t"], unit="s", utc=True)
+    df = df.set_index("Date")[["o", "h", "l", "c", "v"]].rename(
+        columns={"o": "Open", "h": "High", "l": "Low", "c": "Close", "v": "Volume"}
+    )
+    last = df.iloc[-1]
+    pct = (last["Close"] - df.iloc[0]["Open"]) / df.iloc[0]["Open"] * 100
+    mc = mpf.make_marketcolors(up="#26a69a", down="#ef5350", edge="inherit", wick="inherit", volume="inherit")
+    style = mpf.make_mpf_style(marketcolors=mc, gridstyle=":", y_on_right=False)
+    buf = io.BytesIO()
+    mpf.plot(
+        df,
+        type="candle",
+        style=style,
+        volume=False,
+        figsize=(9, 5.5),
+        xrotation=0,
+        datetime_format="%m-%d %H:%M",
+        tight_layout=True,
+        savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
+    )
+    buf.seek(0)
+    return buf.read(), float(last["Close"]), float(pct)
+
+
+def dashboard_url():
+    p = Path(".screener") / "tunnel.log"
+    if p.exists():
+        m = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", p.read_text(errors="ignore"))
+        if m:
+            return m[-1]
+    return None
+
+
+def run(config, store, now):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        raise DataError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+    headers = {
+        "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID"),
+        "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY"),
+    }
+    picks = select(
+        results(store),
+        crypto_movers(config["crypto"]["symbols"]),
+        stock_movers(config["stocks"]["symbols"], headers),
+    )
+    if not picks:
+        raise DataError("No movers or active signals to chart")
+    failures = []
+    for market, symbol, pct, tag, side in picks:
+        try:
+            bars = crypto_bars(symbol) if market == "crypto" else stock_bars(symbol, headers, now)
+            if len(bars) < 2:
+                failures.append(f"{symbol}: no bars")
+                continue
+            png, last, chart_pct = render(bars, symbol)
+        except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
+            failures.append(f"{symbol}: {exc}")
+            continue
+        label = f"{symbol} · {tag} · 15m · {_fmt(last)} · {chart_pct:+.2f}%"
+        send(token, chat, label, png)
+    summary = "SCREENER · 15m movers"
+    link = dashboard_url()
+    if link:
+        summary += "\nDashboard: " + link
+    if failures:
+        summary += "\nSkipped: " + ", ".join(failures)
+    send(token, chat, summary, None)

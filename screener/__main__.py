@@ -25,7 +25,7 @@ def publish(store, out, mode, now):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('once','tick','demo','replay','export'))
+    parser.add_argument('command',choices=('once','tick','demo','replay','export','charts'))
     parser.add_argument('--config',type=Path,default=Path('screener.json'))
     parser.add_argument('--state-dir',type=Path)
     parser.add_argument('--out',type=Path)
@@ -49,6 +49,14 @@ def main(argv=None):
         if args.symbols:
             config[args.market]['symbols'] = [s.strip().upper() for s in args.symbols.split(',')]
         validate_config(config)
+        if args.command == 'charts':
+            from . import charts
+            store = Store(state_dir/'journal.sqlite3')
+            try:
+                charts.run(config, store, now)
+                return 0
+            finally:
+                store.close()
         with locked(state_dir/'run.lock'):
             store = Store(state_dir/'journal.sqlite3')
             try:
