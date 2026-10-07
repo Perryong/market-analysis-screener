@@ -119,14 +119,16 @@ class MarketData:
         saved = self.cache.get(key, {})
         full = self.now-saved.get('full_at', 0) > 7*86400
         start = self.now-(420 if full else 3)*86400
+        # SIP on free/paper accounts is 15-min delayed; end=now 403s ("subscription
+        # does not permit querying recent SIP data"). Treat the delayed point as the
+        # effective "data now" for the WHOLE pipeline (fetch end, bar completeness,
+        # daily close) so we never anchor on a 30-min bar still consolidating.
+        data_now = self.now - 900
         # Begin at a session boundary, never midway through the first day.
         start = datetime.fromtimestamp(start, NY).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
         rows, token, seen = [], None, set()
         while True:
-            # SIP on free/paper accounts is 15-min delayed; querying end=now 403s
-            # ("subscription does not permit querying recent SIP data"). Shift end back
-            # one delay window so the fetch stays entitled; completed bars are unaffected.
-            params = dict(symbols=symbol, timeframe='30Min', start=iso(start), end=iso(self.now - 900),
+            params = dict(symbols=symbol, timeframe='30Min', start=iso(start), end=iso(data_now),
                           adjustment='split', feed=feed, limit=10000, sort='asc')
             if token:
                 params['page_token'] = token
@@ -141,17 +143,17 @@ class MarketData:
         normalized = []
         for r in rows:
             t = timestamp(r['t'])
-            if t+1800 <= self.now:
+            if t+1800 <= data_now:
                 normalized.append(dict(start=t, end=t+1800,
                     **{k:float(r[v]) for k,v in zip(('open','high','low','close','volume'),('o','h','l','c','v'))}))
         retained = [] if full else [b for b in saved.get('rows', []) if b['start'] < start]
         merged = sorted(retained+normalized, key=lambda b:b['start'])
         # Validation must see duplicates, never overwrite them in a dict.
-        validate(merged, self.now)
+        validate(merged, data_now)
         regular = [b for b in merged if any(op <= b['start'] < cl for op,cl in self.sessions)]
-        daily, hourly = stock_bars(regular, self.sessions, self.now)
+        daily, hourly = stock_bars(regular, self.sessions, data_now)
         self.cache[key] = dict(rows=merged, full_at=self.now if full else saved['full_at'])
-        expected = max((cl for op,cl in self.sessions if cl <= self.now), default=0)
+        expected = max((cl for op,cl in self.sessions if cl <= data_now), default=0)
         if not daily or daily[-1]['end'] != expected:
             raise DataError('Latest stock daily candle unavailable')
         # Quote access can differ from historical-data entitlement. Keep setups visible.
