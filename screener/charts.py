@@ -150,7 +150,7 @@ def stock_bars(symbol, headers, now, days=5):
     ]
 
 
-def render(bars, symbol, signal=None):
+def render(bars, symbol, signal=None, live=None):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -177,12 +177,13 @@ def render(bars, symbol, signal=None):
         tight_layout=True,
         savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
     )
+    lines, colors, title_parts = [], [], [symbol]
     if signal and signal.get("entry"):
         side = signal.get("side")
         action = "BUY" if side == "LONG" else "SELL"
         active = signal.get("status") in ACTIVE
-        lines = [signal["entry"]]
-        colors = ["#26a69a" if side == "LONG" else "#ef5350"]
+        lines.append(signal["entry"])
+        colors.append("#26a69a" if side == "LONG" else "#ef5350")
         if active:
             if signal.get("stop"):
                 lines.append(signal["stop"])
@@ -190,12 +191,19 @@ def render(bars, symbol, signal=None):
             if signal.get("target"):
                 lines.append(signal["target"])
                 colors.append("#26a69a")
-            plot_kwargs["title"] = f"{symbol} · {action} {signal['entry']:.2f}"
+            title_parts.append(f"{action} {signal['entry']:.2f}")
         else:
-            plot_kwargs["title"] = f"{symbol} · watch {action} @ {signal['entry']:.2f}"
+            title_parts.append(f"watch {action} @ {signal['entry']:.2f}")
+    if live and live.get("price"):
+        lines.append(live["price"])
+        colors.append("#ff9800")
+        title_parts.append(f"LIVE {'↑' if live['side'] == 'LONG' else '↓'} {live['price']:.2f}")
+    if lines:
         plot_kwargs["hlines"] = dict(
             hlines=lines, colors=colors, linestyle="--", linewidths=[1.1] * len(lines)
         )
+    if len(title_parts) > 1:
+        plot_kwargs["title"] = " · ".join(title_parts)
     mpf.plot(df, **plot_kwargs)
     buf.seek(0)
     return buf.read(), float(last["Close"]), float(pct)
@@ -209,7 +217,13 @@ def signal_of(r):
                 target=r.get("plan_target"))
 
 
-def caption(symbol, tag, sig, last, pct):
+def caption(symbol, tag, sig, last, pct, live=None):
+    if live and live.get("price"):
+        side = live.get("side")
+        action = "BUY" if side == "LONG" else "SELL"
+        arrow = "↑" if side == "LONG" else "↓"
+        trig = f" · trigger {_fmt(sig['entry'])}" if sig and sig.get("entry") else ""
+        return f"🔴 LIVE BREAKOUT {symbol} · {action} {arrow} now {_fmt(live['price'])}{trig} · 15m · {_fmt(last)} · {pct:+.2f}%"
     base = f"{symbol} · {tag}"
     if sig and sig.get("entry"):
         side = sig.get("side")
@@ -223,6 +237,70 @@ def caption(symbol, tag, sig, last, pct):
         else:
             base += f" · watch {action} @ {_fmt(sig['entry'])}"
     return f"{base} · 15m · {_fmt(last)} · {pct:+.2f}%"
+
+
+def live_breakout(r, price, buffer=0.1):
+    upper, lower, atr = r.get("upper"), r.get("lower"), r.get("atr")
+    if not (upper and lower and atr and price):
+        return None
+    if price > upper + buffer * atr:
+        return "LONG"
+    if price < lower - buffer * atr:
+        return "SHORT"
+    return None
+
+
+def live_prices(config, headers, oanda):
+    out = {}
+    syms = config["crypto"]["symbols"]
+    if syms:
+        rows = get_json(BINANCE + "/ticker/price", {"symbols": json.dumps(syms, separators=(",", ":"))})
+        for r in rows:
+            out[("crypto", r["symbol"])] = float(r["price"])
+    for sym in config["metals"]["symbols"]:
+        instrument = sym[:3] + "_" + sym[3:]
+        try:
+            raw = get_json(OANDA_BASE + "/v3/instruments/" + instrument + "/candles",
+                           {"granularity": "M1", "count": 1, "price": "M"}, oanda)
+            out[("metals", sym)] = float(raw["candles"][-1]["mid"]["c"])
+        except (DataError, KeyError, TypeError, ValueError, IndexError):
+            pass
+    syms = config["stocks"]["symbols"]
+    if syms:
+        rows = get_json("https://data.alpaca.markets/v2/stocks/snapshots",
+                        {"symbols": ",".join(syms), "feed": "iex"}, headers)
+        for sym, snap in rows.items():
+            try:
+                out[("stocks", sym)] = float(snap["latestTrade"]["p"])
+            except (KeyError, TypeError, ValueError):
+                pass
+    return out
+
+
+def live_scan(config, store, prices, token, chat, now, buffer=0.1):
+    res = results(store)
+    pings = []
+    for (market, sym), price in prices.items():
+        r = res.get((market, sym))
+        if not r:
+            continue
+        side = live_breakout(r, price, buffer)
+        key = "live:" + market + ":" + sym
+        prev = store.get(key)
+        if side and r.get("status") not in ("CONFIRMED", "RETESTED"):
+            if not prev or prev.get("side") != side:
+                store.put(key, {"side": side, "at": now})
+                pings.append((market, sym, side, price, r))
+        elif prev:
+            store.db.execute("DELETE FROM kv WHERE key=?", (key,))
+    for market, sym, side, price, r in pings:
+        action = "BUY" if side == "LONG" else "SELL"
+        arrow = "↑" if side == "LONG" else "↓"
+        level = r.get("upper") if side == "LONG" else r.get("lower")
+        send(token, chat,
+             f"🔴 LIVE BREAKOUT {sym} · {action} {arrow} now {_fmt(price)} · trigger {_fmt(level)} · confirm on close",
+             None)
+    return pings
 
 
 def dashboard_url():
@@ -244,6 +322,12 @@ def run(config, store, now):
         "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY"),
     }
     oanda_headers = {"Authorization": "Bearer " + os.getenv("OANDA_API_TOKEN", "")}
+    buffer = config["strategy"].get("breakout_atr", 0.1)
+    prices = live_prices(config, headers, oanda_headers)
+    try:
+        live_scan(config, store, prices, token, chat, now, buffer)
+    except (DataError, OSError, ValueError, KeyError, TypeError):
+        pass  # live ping is best-effort; charts still run
     picks = select(
         results(store),
         crypto_movers(config["crypto"]["symbols"]),
@@ -265,11 +349,17 @@ def run(config, store, now):
                 failures.append(f"{symbol}: no bars")
                 continue
             sig = signal_of(r)
-            png, last, chart_pct = render(bars, symbol, sig)
+            live = None
+            price = prices.get((market, symbol))
+            if price and r:
+                lside = live_breakout(r, price, buffer)
+                if lside and r.get("status") not in ("CONFIRMED", "RETESTED"):
+                    live = dict(side=lside, price=price)
+            png, last, chart_pct = render(bars, symbol, sig, live)
         except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
             failures.append(f"{symbol}: {exc}")
             continue
-        label = caption(symbol, tag, sig, last, chart_pct)
+        label = caption(symbol, tag, sig, last, chart_pct, live)
         send(token, chat, label, png)
     summary = "SCREENER · 15m movers"
     link = dashboard_url()
