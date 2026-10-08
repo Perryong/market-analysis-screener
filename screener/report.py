@@ -243,6 +243,10 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
         store.put(key, read)
 
     lines.append("")
+    if prev:
+        lines.append("Previous read:")
+        lines.append(prev)
+        lines.append("")
     lines.append("AI read:")
     lines.append(read if read else ("[dry run — AI read skipped]" if dry_run else "[AI read unavailable]"))
     return "\n".join(lines)
