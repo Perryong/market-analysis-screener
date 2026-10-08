@@ -31,6 +31,13 @@ CSS = (
     ".level-chart{margin:24px 0;padding:18px;border:1px solid #2b3b50;border-radius:10px;background:#0e1723}"
     ".chart-scroll{overflow-x:auto}"
     ".level-chart svg{display:block;width:100%;min-width:760px;font:14px system-ui}"
+    ".analysis{margin:24px 0;padding:18px;border:1px solid #2b3b50;border-radius:10px;background:#0e1723}"
+    ".analysis h3{font-size:17px;margin:18px 0 6px}"
+    ".analysis .row{display:flex;gap:14px;padding:3px 0;font-size:15px}"
+    ".analysis .k{color:#a4b5c8;min-width:200px;flex:none}"
+    ".analysis .v.bull{color:#63e3c4}.analysis .v.bear{color:#ffa5ae}"
+    ".analysis p{font-size:15px;margin:5px 0}"
+    ".analysis .prev{color:#8fa3bd}"
 )
 
 
@@ -66,7 +73,7 @@ def _clock(ts):
     return datetime.fromtimestamp(float(ts), SGT).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def svg(symbol, bars, r, market, source, checked_at):
+def svg(symbol, bars, r, market, source, checked_at, analysis_html=None):
     """Return the full SVG chart fragment (h2 + meta + level-chart svg)."""
     bullish, bearish = targets(r)
     levels = [("BUY retest", r.get("upper"), TEAL),
@@ -135,10 +142,40 @@ def svg(symbol, bars, r, market, source, checked_at):
         + f'<text x="20" y="440" fill="{MUTED}">{_clock(t0)}</text>'
         f'<text x="800" y="440" text-anchor="end" fill="{MUTED}">{_clock(close_time)}</text>'
         f'</svg></div></div>'
+        + (analysis_html or "")
     )
 
 
-def render_png(svg_html):
+def _trim(data, bg=(11, 17, 27), pad=20):
+    """Crop trailing uniform-background rows (chromium viewport is taller than content)."""
+    import io as _io
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(data)).convert("RGB")
+    except Exception:
+        return data
+    w, h = im.size
+    px = im.load()
+    bottom = None
+    for y in range(h - 1, -1, -1):
+        for x in range(0, w, 3):
+            if px[x, y] != bg:
+                bottom = y
+                break
+        if bottom is not None:
+            break
+    if bottom is None:
+        return data
+    bottom = min(h, bottom + pad)
+    if bottom >= h - 2:
+        return data
+    im2 = im.crop((0, 0, w, bottom))
+    buf = _io.BytesIO()
+    im2.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_png(svg_html, height=2400):
     browser = os.getenv("CHROME_BIN") or shutil.which("chromium") or shutil.which("google-chrome")
     if not browser:
         raise DataError("Chrome is required to render chart images")
@@ -153,14 +190,14 @@ def render_png(svg_html):
         cmd = [
             browser, "--headless", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
             "--no-default-browser-check", "--force-device-scale-factor=1", "--timeout=5000",
-            "--disable-background-networking", "--window-size=1200,900",
+            "--disable-background-networking", f"--window-size=1200,{height}",
             "--user-data-dir=" + str(root / "profile"), "--screenshot=" + str(image),
             html_file.as_uri(),
         ]
         subprocess.run(cmd, check=True, capture_output=True, timeout=30)
         data = image.read_bytes()
         if data.startswith(b"\x89PNG\r\n\x1a\n") and data.endswith(b"IEND\xaeB`\x82"):
-            return data
+            return _trim(data)
         raise DataError("Chrome did not produce a complete PNG")
 
 

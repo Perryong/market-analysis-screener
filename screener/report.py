@@ -7,6 +7,7 @@ previous read is fed back in so each run compares against its own history. Sends
 text card per symbol to the configured Telegram chat. No broker orders.
 """
 
+import html
 import json
 import os
 import urllib.request
@@ -16,6 +17,7 @@ from .shared import DataError, send
 from .feeds import MarketData
 from .charts import results, signal_of, crypto_bars, stock_bars, metal_bars
 from .runtime import Cache
+from . import pwchart
 
 SGT = timezone(timedelta(hours=8))
 ACTIVE = ("CONFIRMED", "DEVELOPING", "RETESTED", "ENTRY_ELIGIBLE")
@@ -213,17 +215,20 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
     lines.append("")
     if status in ACTIVE and side in ("LONG", "SHORT"):
         lvl = upper if side == "LONG" else lower
-        lines.append(f"Setup: {'broke above' if side == 'LONG' else 'broke below'} {fmt(lvl)}")
+        setup_txt = f"{'broke above' if side == 'LONG' else 'broke below'} {fmt(lvl)}"
     elif status == "WATCHING" and side in ("LONG", "SHORT"):
         lvl = upper if side == "LONG" else lower
-        lines.append(f"Setup: watching {'breakout' if side == 'LONG' else 'breakdown'} vs {fmt(lvl)}")
+        setup_txt = f"watching {'breakout' if side == 'LONG' else 'breakdown'} vs {fmt(lvl)}"
     else:
-        lines.append(f"Setup: {status}")
+        setup_txt = f"{status}"
+    lines.append(f"Setup: {setup_txt}")
 
     lines.append("")
     lines.append("Last completed candles (SGT):")
-    lines.append(f"1H: {datetime.fromtimestamp(closed['end'], SGT):%Y-%m-%d %H:%M:%S} +08")
-    lines.append(f"{tf}: {datetime.fromtimestamp(setup[-1]['end'], SGT):%Y-%m-%d %H:%M:%S} +08")
+    last_1h = f"{datetime.fromtimestamp(closed['end'], SGT):%Y-%m-%d %H:%M:%S} +08"
+    last_tf = f"{datetime.fromtimestamp(setup[-1]['end'], SGT):%Y-%m-%d %H:%M:%S} +08"
+    lines.append(f"1H: {last_1h}")
+    lines.append(f"{tf}: {last_tf}")
     lines.append("")
     lines.append("Analysis only · No orders placed")
     lines.append(tv_link(symbol, market))
@@ -249,7 +254,45 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
         lines.append("")
     lines.append("AI read:")
     lines.append(read if read else ("[dry run — AI read skipped]" if dry_run else "[AI read unavailable]"))
-    return "\n".join(lines)
+    fields = dict(
+        top=top, dir_label=dir_label, d_txt=d_txt, d_up=d_up, comb_txt=comb_txt,
+        price=fmt(cur), upper=fmt(upper), lower=fmt(lower), trend_up=trend_up,
+        closed_open=fmt(closed["open"]), closed_close=fmt(closed["close"]), chg=chg,
+        fvgs_near=fvgs_near, setup_txt=setup_txt, last_1h=last_1h, last_tf=last_tf,
+        prev_read=prev, ai_read=read, tv_link=tv_link(symbol, market), tf=tf,
+    )
+    return "\n".join(lines), fields
+
+
+def analysis_html(f):
+    """Render the report-card analysis as an HTML block for embedding in the chart image."""
+    esc = html.escape
+    comb_val = f["comb_txt"].split(": ", 1)[-1]
+    fvg_txt = " · ".join(f"{t}: {fmt(bot)}–{fmt(top)}" for t, bot, top in f["fvgs_near"]) or "no open FVG near price"
+    rows = [
+        (f["dir_label"], f["d_txt"], "bull" if f["d_up"] else "bear"),
+        (f"COMBINED ({f['tf']}+1H)", comb_val, ""),
+        ("Price", f["price"], ""),
+        ("Pivots", f"Upper {f['upper']} · Lower {f['lower']}", ""),
+        ("1H trend", "↑ (up)" if f["trend_up"] else "↓ (down)", "bull" if f["trend_up"] else "bear"),
+        ("1H closed", f"{f['closed_open']} → {f['closed_close']} ({f['chg']:+.2f}%)", ""),
+        ("Open FVG", fvg_txt, ""),
+        ("Setup", f["setup_txt"], ""),
+    ]
+    body = "".join(
+        f'<div class="row"><span class="k">{esc(k)}</span><span class="v {cls}">{esc(v)}</span></div>'
+        for k, v, cls in rows
+    )
+    ai = f'<p>{esc(f["ai_read"])}</p>' if f["ai_read"] else ""
+    prev = (f'<h3>Previous read</h3><p class="prev">{esc(f["prev_read"])}</p>' if f["prev_read"] else "")
+    return (
+        '<div class="analysis"><h3>Analysis</h3>' + body
+        + '<div class="row"><span class="k">Last completed</span><span class="v">'
+        + f"1H {esc(f['last_1h'])} · {f['tf']} {esc(f['last_tf'])}</span></div>"
+        + prev + '<h3>AI read</h3>' + ai
+        + '<p class="meta">Analysis only · No orders placed</p>'
+        + f'<p class="meta">{esc(f["tv_link"])}</p></div>'
+    )
 
 
 def run(config, store, now, dry_run=False, only=None, symbols=None):
@@ -282,17 +325,30 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
                 continue
             cur = (bundle.get("quote") or {}).get("price") or hourly[-1]["close"]
             pct = pct_15m(market, sym, headers, oanda, now)
-            text = card(r, sym, market, setup, hourly, cur, store, dry_run, pct)
+            text, fields = card(r, sym, market, setup, hourly, cur, store, dry_run, pct)
             if dry_run:
                 print(text)
                 print("\n" + "=" * 60 + "\n")
+                continue
+            if market == "crypto":
+                bars = pwchart.crypto_bars_1h(sym)
+                source = "binance"
+            elif market == "stocks":
+                bars = pwchart.stock_bars_1h(sym, headers, now)
+                source = "alpaca iex"
             else:
-                send(token, chat, text, None)
-                sent += 1
+                bars = pwchart.metal_bars_1h(sym, oanda)
+                source = "oanda practice"
+            if len(bars) < 2:
+                failures.append(f"{sym}: no 1H bars")
+                continue
+            png = pwchart.render_png(pwchart.svg(sym, bars, r, market, source, now, analysis_html(fields)))
+            send(token, chat, fields["top"], png)
+            sent += 1
         except (DataError, OSError, ValueError, KeyError, TypeError, IndexError) as exc:
             failures.append(f"{sym}: {exc}")
     if not dry_run and sent:
-        summary = f"SCREENER REPORT · {sent} cards"
+        summary = f"SCREENER REPORT · {sent} charts"
         if failures:
             summary += "\nSkipped: " + ", ".join(failures)
         send(token, chat, summary, None)
