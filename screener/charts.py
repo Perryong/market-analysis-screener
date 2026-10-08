@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from .shared import DataError, get_json, iso, send, timestamp
+from . import pwchart
 
 BINANCE = "https://data-api.binance.vision/api/v3"
 OANDA_BASE = "https://api-fxpractice.oanda.com"
@@ -223,7 +224,7 @@ def caption(symbol, tag, sig, last, pct, live=None):
         action = "BUY" if side == "LONG" else "SELL"
         arrow = "↑" if side == "LONG" else "↓"
         trig = f" · trigger {_fmt(sig['entry'])}" if sig and sig.get("entry") else ""
-        return f"🔴 LIVE BREAKOUT {symbol} · {action} {arrow} now {_fmt(live['price'])}{trig} · 15m · {_fmt(last)} · {pct:+.2f}%"
+        return f"🔴 LIVE BREAKOUT {symbol} · {action} {arrow} now {_fmt(live['price'])}{trig} · 1H · {_fmt(last)} · {pct:+.2f}%"
     base = f"{symbol} · {tag}"
     if sig and sig.get("entry"):
         side = sig.get("side")
@@ -236,7 +237,7 @@ def caption(symbol, tag, sig, last, pct, live=None):
                 base += f" · target {_fmt(sig['target'])}"
         else:
             base += f" · watch {action} @ {_fmt(sig['entry'])}"
-    return f"{base} · 15m · {_fmt(last)} · {pct:+.2f}%"
+    return f"{base} · 1H · {_fmt(last)} · {pct:+.2f}%"
 
 
 def live_breakout(r, price, buffer=0.1):
@@ -340,11 +341,14 @@ def run(config, store, now):
     for market, symbol, pct, tag, side, r in picks:
         try:
             if market == "crypto":
-                bars = crypto_bars(symbol)
+                bars = pwchart.crypto_bars_1h(symbol)
+                source = "binance"
             elif market == "stocks":
-                bars = stock_bars(symbol, headers, now)
+                bars = pwchart.stock_bars_1h(symbol, headers, now)
+                source = "alpaca iex"
             else:
-                bars = metal_bars(symbol, oanda_headers)
+                bars = pwchart.metal_bars_1h(symbol, oanda_headers)
+                source = "oanda practice"
             if len(bars) < 2:
                 failures.append(f"{symbol}: no bars")
                 continue
@@ -355,13 +359,15 @@ def run(config, store, now):
                 lside = live_breakout(r, price, buffer)
                 if lside and r.get("status") not in ("CONFIRMED", "RETESTED"):
                     live = dict(side=lside, price=price)
-            png, last, chart_pct = render(bars, symbol, sig, live)
+            png = pwchart.render_png(pwchart.svg(symbol, bars, r or {}, market, source, now))
+            last = bars[-1]["c"]
+            chart_pct = (bars[-1]["c"] - bars[0]["o"]) / bars[0]["o"] * 100
         except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
             failures.append(f"{symbol}: {exc}")
             continue
         label = caption(symbol, tag, sig, last, chart_pct, live)
         send(token, chat, label, png)
-    summary = "SCREENER · 15m movers"
+    summary = "SCREENER · 1H pivots"
     link = dashboard_url()
     if link:
         summary += "\nDashboard: " + link
