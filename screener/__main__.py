@@ -25,14 +25,15 @@ def publish(store, out, mode, now):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('once','tick','demo','replay','export','charts'))
+    parser.add_argument('command',choices=('once','tick','demo','replay','export','charts','report'))
     parser.add_argument('--config',type=Path,default=Path('screener.json'))
     parser.add_argument('--state-dir',type=Path)
     parser.add_argument('--out',type=Path)
-    parser.add_argument('--market',choices=('stocks','crypto'))
+    parser.add_argument('--market',choices=('stocks','crypto','metals'))
     parser.add_argument('--symbols',help='Comma-separated override for --market')
     parser.add_argument('--bundle',type=Path,help='Replay input or export output file')
     parser.add_argument('--notify',action='store_true',help='Send fresh transitions to configured Telegram recipients')
+    parser.add_argument('--dry-run',action='store_true',help='Generate without sending (report command: skips AI read)')
     args = parser.parse_args(argv)
     mode = args.command if args.command in ('demo','replay') else 'live'
     state_dir = args.state_dir or Path('.screener')/mode
@@ -55,6 +56,17 @@ def main(argv=None):
             try:
                 charts.run(config, store, now)
                 return 0
+            finally:
+                store.close()
+        if args.command == 'report':
+            from . import report
+            store = Store(state_dir/'journal.sqlite3')
+            try:
+                syms = [s.strip().upper() for s in args.symbols.split(',')] if args.symbols else None
+                failures = report.run(config, store, now, dry_run=args.dry_run, only=args.market, symbols=syms)
+                for f in failures:
+                    print(f, file=sys.stderr)
+                return 1 if failures else 0
             finally:
                 store.close()
         with locked(state_dir/'run.lock'):
