@@ -155,7 +155,7 @@ def pct_15m(market, symbol, headers, oanda, now):
         return None
 
 
-def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
+def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached_read=False):
     sig = signal_of(r)
     status = r.get("status")
     side = (sig or {}).get("side")
@@ -243,9 +243,13 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
     )
     key = f"airead:{market}:{symbol}"
     prev = store.get(key)
-    read = None if dry_run else ai_read(symbol, prev, ctx)
-    if read:
-        store.put(key, read)
+    if cached_read:
+        read = prev          # reuse the latest cached AI read — no fresh DeepSeek call
+        prev = None          # no "Previous read" block in cached mode
+    else:
+        read = None if dry_run else ai_read(symbol, prev, ctx)
+        if read:
+            store.put(key, read)
 
     lines.append("")
     if prev:

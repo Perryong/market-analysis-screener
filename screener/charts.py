@@ -13,6 +13,8 @@ from pathlib import Path
 
 from .shared import DataError, get_json, iso, send, timestamp
 from . import pwchart
+from .feeds import MarketData
+from .runtime import Cache
 
 BINANCE = "https://data-api.binance.vision/api/v3"
 OANDA_BASE = "https://api-fxpractice.oanda.com"
@@ -323,6 +325,8 @@ def run(config, store, now):
         "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY"),
     }
     oanda_headers = {"Authorization": "Bearer " + os.getenv("OANDA_API_TOKEN", "")}
+    data = MarketData(config, Cache(store), now)
+    from . import report  # lazy: report imports charts, avoid module-level cycle
     buffer = config["strategy"].get("breakout_atr", 0.1)
     prices = live_prices(config, headers, oanda_headers)
     try:
@@ -362,6 +366,22 @@ def run(config, store, now):
             png = pwchart.render_png(pwchart.svg(symbol, bars, r or {}, market, source, now))
             last = bars[-1]["c"]
             chart_pct = (bars[-1]["c"] - bars[0]["o"]) / bars[0]["o"] * 100
+            try:
+                if market == "crypto":
+                    bundle = data.crypto(symbol)
+                elif market == "stocks":
+                    bundle = data.stock(symbol)
+                else:
+                    bundle = data.metal(symbol)
+                setup, hourly = bundle["setup"], bundle["hourly"]
+                if len(setup) < 55 or len(hourly) < 55:
+                    continue
+                cur = (bundle.get("quote") or {}).get("price") or hourly[-1]["close"]
+                _, fields = report.card(r or {}, symbol, market, setup, hourly, cur, store, dry_run=False, cached_read=True)
+                analysis = report.analysis_html(fields)
+                png = pwchart.render_png(pwchart.svg(symbol, bars, r or {}, market, source, now, analysis))
+            except (DataError, OSError, ValueError, KeyError, TypeError, IndexError):
+                pass  # analysis is best-effort; keep the plain chart
         except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
             failures.append(f"{symbol}: {exc}")
             continue
