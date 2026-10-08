@@ -18,6 +18,7 @@ from .feeds import MarketData
 from .charts import results, signal_of, crypto_bars, stock_bars, metal_bars
 from .runtime import Cache
 from . import pwchart
+from . import history
 
 SGT = timezone(timedelta(hours=8))
 ACTIVE = ("CONFIRMED", "DEVELOPING", "RETESTED", "ENTRY_ELIGIBLE")
@@ -347,13 +348,17 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
                 failures.append(f"{sym}: no 1H bars")
                 continue
             png = pwchart.render_png(pwchart.svg(sym, bars, r, market, source, now, analysis_html(fields)))
+            history.write(sym, fields, png, now)
             send(token, chat, fields["top"], png)
             sent += 1
         except (DataError, OSError, ValueError, KeyError, TypeError, IndexError) as exc:
             failures.append(f"{sym}: {exc}")
+    git_err = history.git_commit(now, sent) if (not dry_run and sent) else None
     if not dry_run and sent:
         summary = f"SCREENER REPORT · {sent} charts"
         if failures:
             summary += "\nSkipped: " + ", ".join(failures)
+        if git_err:
+            summary += "\n" + git_err
         send(token, chat, summary, None)
     return failures
