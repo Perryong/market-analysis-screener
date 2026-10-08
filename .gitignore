@@ -5,3 +5,6 @@ __pycache__/
 .screener/
 *.tmp
 .DS_Store
+# history charts stay local on the Pi; only the Markdown analysis is committed
+history/**/*.png
+
