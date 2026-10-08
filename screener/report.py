@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 from .shared import DataError, send
 from .feeds import MarketData
-from .charts import results, signal_of
+from .charts import results, signal_of, crypto_bars, stock_bars, metal_bars
 from .runtime import Cache
 
 SGT = timezone(timedelta(hours=8))
@@ -137,7 +137,23 @@ def tv_link(symbol, market):
     return f"https://www.tradingview.com/chart/?symbol={prefix}{symbol}&interval={interval}"
 
 
-def card(r, symbol, market, setup, hourly, cur, store, dry_run):
+def pct_15m(market, symbol, headers, oanda, now):
+    """% change over the 15-minute chart window (first open → last close), matching the chart caption."""
+    try:
+        if market == "crypto":
+            bars = crypto_bars(symbol)
+        elif market == "metals":
+            bars = metal_bars(symbol, oanda)
+        else:
+            bars = stock_bars(symbol, headers, now)
+        if len(bars) < 2:
+            return None
+        return (bars[-1]["c"] - bars[0]["o"]) / bars[0]["o"] * 100
+    except (DataError, OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+
+
+def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None):
     sig = signal_of(r)
     status = r.get("status")
     side = (sig or {}).get("side")
@@ -157,11 +173,14 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run):
     comb = combined(d_up, s1)
 
     side_label = "BUY" if side == "LONG" else ("SELL" if side == "SHORT" else "—")
-    top = f"{symbol} · {side_label}"
-    if status == "WATCHING":
-        top += " (watching)"
-    elif status and status not in ACTIVE:
-        top += f" ({status.lower()})"
+    pct_txt = f"{pct:+.2f}%" if pct is not None else "—"
+    if entry and status in ACTIVE and side in ("LONG", "SHORT"):
+        top = f"{symbol} · {status} · {side_label} entry {fmt(entry)} · stop {fmt(stop)} · target {fmt(target)} · 15m · {fmt(cur)} · {pct_txt}"
+    elif status == "WATCHING" and side in ("LONG", "SHORT"):
+        lvl = upper if side == "LONG" else lower
+        top = f"{symbol} · WATCHING · watch {side_label} @ {fmt(lvl)} · 15m · {fmt(cur)} · {pct_txt}"
+    else:
+        top = f"{symbol} · {status} · 15m · {fmt(cur)} · {pct_txt}"
 
     if comb != "HOLD":
         comb_txt = f"COMBINED ({tf}+1H): {comb} — {'bullish' if d_up else 'bearish'} {tf} + {why1}"
@@ -194,14 +213,12 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run):
     lines.append("")
     if status in ACTIVE and side in ("LONG", "SHORT"):
         lvl = upper if side == "LONG" else lower
-        lines.append(f"Screener: {status} {side_label} ({'broke above' if side == 'LONG' else 'broke below'} {fmt(lvl)})")
-        if entry:
-            lines.append(f"Entry: {fmt(entry)} · Stop: {fmt(stop)} · Target: {fmt(target)}")
+        lines.append(f"Setup: {'broke above' if side == 'LONG' else 'broke below'} {fmt(lvl)}")
     elif status == "WATCHING" and side in ("LONG", "SHORT"):
         lvl = upper if side == "LONG" else lower
-        lines.append(f"Screener: WATCHING — {'breakout' if side == 'LONG' else 'breakdown'} vs {fmt(lvl)}")
+        lines.append(f"Setup: watching {'breakout' if side == 'LONG' else 'breakdown'} vs {fmt(lvl)}")
     else:
-        lines.append(f"Screener: {status}")
+        lines.append(f"Setup: {status}")
 
     lines.append("")
     lines.append("Last completed candles (SGT):")
@@ -237,6 +254,8 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
     if not dry_run and (not token or not chat):
         raise DataError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
     data = MarketData(config, Cache(store), now)
+    headers = {"APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID"), "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY")}
+    oanda = {"Authorization": "Bearer " + os.getenv("OANDA_API_TOKEN", "")}
     res = results(store)
     failures, sent = [], 0
     for (market, sym), r in sorted(res.items()):
@@ -258,7 +277,8 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
                 failures.append(f"{sym}: insufficient candles")
                 continue
             cur = (bundle.get("quote") or {}).get("price") or hourly[-1]["close"]
-            text = card(r, sym, market, setup, hourly, cur, store, dry_run)
+            pct = pct_15m(market, sym, headers, oanda, now)
+            text = card(r, sym, market, setup, hourly, cur, store, dry_run, pct)
             if dry_run:
                 print(text)
                 print("\n" + "=" * 60 + "\n")
