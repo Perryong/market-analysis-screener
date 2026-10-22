@@ -3,7 +3,7 @@ from copy import deepcopy
 from statistics import mean, median
 import math
 
-from .shared import DataError, fingerprint
+from .shared import DataError, bar_fingerprint
 
 DEFAULTS = dict(lookback=20, volume_ratio=1.5, breakout_atr=.1,
                 compression_ratio=.8, developing_atr=.5, retest_band_atr=.2,
@@ -124,11 +124,11 @@ def evaluate(bundle, saved, settings, now):
     if saved:
         for name, bars, key in (('setup', setup, 'setup_end'), ('hour', hourly, 'hour_end')):
             anchor = next((b for b in bars if b['end'] == saved[key]), None)
-            if anchor is None or fingerprint(anchor) != saved[name+'_anchor']:
+            if anchor is None or bar_fingerprint(anchor) != saved[name+'_anchor']:
                 raise DataError('Missing/revised anchor; explicit rebaseline required')
         if saved['status'] in ACTIVE:
             for name,bars in (('setup_evidence',setup),('hour_evidence',hourly)):
-                indexed = {b['end']:fingerprint(b) for b in bars}
+                indexed = {b['end']:bar_fingerprint(b) for b in bars}
                 if any(indexed.get(t) != digest for t,digest in saved.get(name,[])):
                     raise DataError('Missing/revised setup evidence; explicit rebaseline required')
     events = []
@@ -153,7 +153,7 @@ def evaluate(bundle, saved, settings, now):
                 state.update(side=side, level=level, target=level+(f['upper']-f['lower'])*(1 if side=='LONG' else -1),
                              upper=f['upper'],lower=f['lower'],
                              trigger=when, setup_atr=f['atr'], age=0, volume_ratio=f['volume_ratio'],
-                             setup_evidence=[(v['end'],fingerprint(v)) for v in setup[max(0,i-settings['lookback']):i+1]],
+                             setup_evidence=[(v['end'],bar_fingerprint(v)) for v in setup[max(0,i-settings['lookback']):i+1]],
                              hour_evidence=[])
                 state.pop('retest_end', None)
                 change('CONFIRMED', when)
@@ -161,7 +161,7 @@ def evaluate(bundle, saved, settings, now):
         if state['status'] not in ACTIVE or b['start'] < state['trigger']:
             continue
         sign = 1 if state['side'] == 'LONG' else -1
-        state.setdefault('hour_evidence',[]).append((b['end'],fingerprint(b)))
+        state.setdefault('hour_evidence',[]).append((b['end'],bar_fingerprint(b)))
         state['age'] += 1
         if sign*(b['close']-state['level']) <= 0:
             change('INVALIDATED', when)
@@ -198,7 +198,7 @@ def evaluate(bundle, saved, settings, now):
             result[k] = state[k]
     result.update(plan(result, state, settings))
     state.update(setup_end=setup[-1]['end'], hour_end=hourly[-1]['end'],
-                 setup_anchor=fingerprint(setup[-1]), hour_anchor=fingerprint(hourly[-1]))
+                 setup_anchor=bar_fingerprint(setup[-1]), hour_anchor=bar_fingerprint(hourly[-1]))
     return result, state, events
 
 

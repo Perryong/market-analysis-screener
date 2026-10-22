@@ -21,6 +21,16 @@ def fingerprint(config):
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
 
 
+def bar_fingerprint(bar):
+    # Stable fingerprint of a bar's OHLC structure + timestamps. Excludes close
+    # and volume, which Alpaca's SIP feed revises on the day's final 30-min
+    # closing-auction bar AFTER the US close. Treating that revision as corruption
+    # would re-trip the anchor check every trading day, so anchor/evidence hashes
+    # must ignore those two fields.
+    stable = {k: bar.get(k) for k in ('open', 'high', 'low', 'start', 'end')}
+    return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
+
+
 def timestamp(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
