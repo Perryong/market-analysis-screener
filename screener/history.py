@@ -5,20 +5,15 @@ history/<SYM>/, then git add/commit/push the whole history/ tree (best-effort �
 a git failure never blocks the Telegram send). Read-only market data.
 """
 import subprocess
+import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from .reporting import number as _fmt
+from .shared import progress
 
 SGT = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parent.parent  # repo root
 HISTORY = ROOT / "history"
-
-
-def _fmt(v):
-    if v is None:
-        return "—"
-    if abs(v) >= 1:
-        return f"{v:,.2f}"
-    return f"{v:,.4f}"
 
 
 def _fvg_text(fvgs):
@@ -29,11 +24,14 @@ def _fvg_text(fvgs):
 
 def write(symbol, fields, png, now):
     """Write history/<SYM>/<stamp>.md (+ .png) and return the md path."""
+    progress('publisher','archive',symbol)
     ts = datetime.fromtimestamp(now, SGT)
     stamp = ts.strftime("%Y-%m-%d_%H%M%S")
     d = HISTORY / symbol
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{stamp}.png").write_bytes(png)
+    if fields.get('snapshot') is not None:
+        (d / f'{stamp}.json').write_text(json.dumps(fields['snapshot'], indent=2, allow_nan=False), encoding='utf-8')
     trend = "↑ (up)" if fields["trend_up"] else "↓ (down)"
     lines = [
         f"# {symbol} · {ts.strftime('%Y-%m-%d %H:%M:%S')} +08",
@@ -50,6 +48,8 @@ def write(symbol, fields, png, now):
         f"- 1H closed: {fields['closed_open']} → {fields['closed_close']} ({fields['chg']:+.2f}%)",
         f"- Open FVG: {_fvg_text(fields['fvgs_near'])}",
         f"- Setup: {fields['setup_txt']}",
+        f"- Evidence: {fields.get('data_note', 'Unavailable')}",
+        f"- Read mode: {fields.get('read_mode', 'Legacy unvalidated read')}",
         f"- Last completed: 1H {fields['last_1h']} · {fields['tf']} {fields['last_tf']}",
         "",
         f"![Chart]({stamp}.png)",
@@ -57,7 +57,9 @@ def write(symbol, fields, png, now):
     ]
     if fields["prev_read"]:
         lines += ["## Previous read", "", fields["prev_read"], ""]
-    lines += ["## AI read", "", fields["ai_read"] or "—", ""]
+    lines += ["## Verified read", "", fields["ai_read"] or "—", ""]
+    if fields.get('snapshot') is not None:
+        lines += [f'[Evidence snapshot]({stamp}.json)', '']
     lines += ["", "*Analysis only · No orders placed*", "", fields["tv_link"], ""]
     md_path = d / f"{stamp}.md"
     md_path.write_text("\n".join(lines), encoding="utf-8")

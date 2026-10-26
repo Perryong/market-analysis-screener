@@ -1,7 +1,7 @@
 """Deterministic recorded-bar replay and offline synthetic demonstration."""
 from . import engine
 from .runtime import process
-from .shared import DataError
+from .shared import DataError, progress
 
 
 def verify_coverage(bundle):
@@ -61,6 +61,7 @@ def demo(store, now, settings, paper):
 
     settings = dict(settings,round_trip_cost_bps=10)
     for symbol, outcome in [('BTCUSDT','entry'),('ETHUSDT','invalid'),('SOLUSDT','pending')]:
+        progress('feed','synthesize',symbol,market='crypto')
         bundle = dict(symbol=symbol,market='crypto',source='SYNTHETIC DEMO',regime='BULLISH',market_open=True,
                       setup=[b(i,14400) for i in range(25)],hourly=[b(i) for i in range(100)],
                       quote=dict(price=100,time=base+360000))

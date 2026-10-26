@@ -186,8 +186,12 @@ class ScreenerTest(unittest.TestCase):
 
     def test_revised_anchor_and_future_bar_rejected(self):
         engine, settings, bundle, saved = self.setup()
+        # Close/volume revisions are tolerated (Alpaca closing-auction); structural OHLC changes are not.
+        ok = copy.deepcopy(bundle)
+        ok['setup'][-1]['close'] = 112
+        engine.evaluate(ok, saved, settings, 374403)
         bad = copy.deepcopy(bundle)
-        bad['setup'][-1]['close'] = 112
+        bad['setup'][-1]['high'] += 1
         with self.assertRaisesRegex(ValueError, 'revised'):
             engine.evaluate(bad, saved, settings, 374403)
         bad = copy.deepcopy(bundle)
@@ -340,7 +344,7 @@ class ScreenerTest(unittest.TestCase):
         bundle['quote']=dict(price=113,time=388803)
         result,saved,_=engine.evaluate(bundle,saved,settings,388803)
         self.assertEqual(result['upper'],110)
-        bundle['setup'][25]['close']=109
+        bundle['setup'][25]['high']+=1
         with self.assertRaisesRegex(ValueError,'revised'):
             engine.evaluate(bundle,saved,settings,388804)
 
@@ -368,7 +372,8 @@ class ScreenerTest(unittest.TestCase):
     def test_alpaca_calendar_handles_dst_and_pagination(self):
         from screener import feeds,runtime
         start=datetime.fromisoformat('2026-09-29T09:30:00-04:00').timestamp()
-        now=start+23460
+        # The final SIP bar is available only after the feed's 15-minute delay.
+        now=start+23460+900
         raw=[dict(t=datetime.fromtimestamp(start+i*1800).astimezone().isoformat(),o=100,h=101,l=99,c=100,v=100)
              for i in range(13)]
         payloads=[dict(bars={'TEST':raw[:7]},next_page_token='page2'),dict(bars={'TEST':raw[7:]},next_page_token=None),
