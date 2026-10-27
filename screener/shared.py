@@ -2,7 +2,9 @@
 Originally from the market-pivot-watch pivot_watch package; copied here so the screener stands alone."""
 import hashlib
 import json
+import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -14,6 +16,12 @@ from pathlib import Path
 
 class DataError(ValueError):
     """Data cannot support a verified signal."""
+
+
+def progress(agent, action, symbol=None, **info):
+    """One JSON line on stderr for the office view; silent unless SCREENER_PROGRESS=1."""
+    if os.environ.get('SCREENER_PROGRESS') == '1':
+        print(json.dumps(dict(info, agent=agent, action=action, symbol=symbol, at=time.time())), file=sys.stderr, flush=True)
 
 
 def fingerprint(config):

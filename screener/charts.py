@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from .shared import DataError, get_json, iso, send, timestamp
+from .reporting import number as precise
 from . import pwchart
 from .feeds import MarketData
 from .runtime import Cache
@@ -223,22 +224,22 @@ def signal_of(r):
 def caption(symbol, tag, sig, last, pct, live=None):
     if live and live.get("price"):
         side = live.get("side")
-        action = "BUY" if side == "LONG" else "SELL"
         arrow = "↑" if side == "LONG" else "↓"
-        trig = f" · trigger {_fmt(sig['entry'])}" if sig and sig.get("entry") else ""
-        return f"🔴 LIVE BREAKOUT {symbol} · {action} {arrow} now {_fmt(live['price'])}{trig} · 1H · {_fmt(last)} · {pct:+.2f}%"
+        trig = f" · trigger {precise(sig['entry'])}" if sig and sig.get("entry") else ""
+        status = (sig or {}).get('status', 'UNKNOWN')
+        return f"PIVOT CROSS {symbol} · {arrow} {precise(live['price'])}{trig} · strategy {status} · price observation, not entry eligibility · 1H · {_fmt(last)} · {pct:+.2f}%"
     base = f"{symbol} · {tag}"
     if sig and sig.get("entry"):
         side = sig.get("side")
         action = "BUY" if side == "LONG" else "SELL"
         if sig.get("status") in ACTIVE:
-            base += f" · {action} entry {_fmt(sig['entry'])}"
+            base += f" · {action} conditional plan entry {precise(sig['entry'])}"
             if sig.get("stop"):
-                base += f" · stop {_fmt(sig['stop'])}"
+                base += f" · stop {precise(sig['stop'])}"
             if sig.get("target"):
-                base += f" · target {_fmt(sig['target'])}"
+                base += f" · target {precise(sig['target'])}"
         else:
-            base += f" · watch {action} @ {_fmt(sig['entry'])}"
+            base += f" · watch {action} @ {precise(sig['entry'])}"
     return f"{base} · 1H · {_fmt(last)} · {pct:+.2f}%"
 
 
@@ -297,11 +298,10 @@ def live_scan(config, store, prices, token, chat, now, buffer=0.1):
         elif prev:
             store.db.execute("DELETE FROM kv WHERE key=?", (key,))
     for market, sym, side, price, r in pings:
-        action = "BUY" if side == "LONG" else "SELL"
         arrow = "↑" if side == "LONG" else "↓"
         level = r.get("upper") if side == "LONG" else r.get("lower")
         send(token, chat,
-             f"🔴 LIVE BREAKOUT {sym} · {action} {arrow} now {_fmt(price)} · trigger {_fmt(level)} · confirm on close",
+             f"PIVOT CROSS {sym} · {arrow} {precise(price)} · pivot {precise(level)} · strategy {r.get('status', 'UNKNOWN')} · price observation, not entry eligibility",
              None)
     return pings
 
@@ -377,7 +377,8 @@ def run(config, store, now):
                 if len(setup) < 55 or len(hourly) < 55:
                     continue
                 cur = (bundle.get("quote") or {}).get("price") or hourly[-1]["close"]
-                _, fields = report.card(r or {}, symbol, market, setup, hourly, cur, store, dry_run=False, cached_read=True)
+                _, fields = report.card(r or {}, symbol, market, setup, hourly, cur, store, dry_run=False,
+                                        cached_read=True, now=now, bundle=bundle)
                 analysis = report.analysis_html(fields)
                 png = pwchart.render_png(pwchart.svg(symbol, bars, r or {}, market, source, now, analysis))
             except (DataError, OSError, ValueError, KeyError, TypeError, IndexError):
