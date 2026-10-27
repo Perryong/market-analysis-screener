@@ -87,6 +87,37 @@ class OfficeTest(unittest.TestCase):
         self.assertEqual((site / 'latest.json').read_text(), '{}')
         self.assertTrue((site / 'office' / 'calendar.json').exists())
 
+    def test_git_commit_rebases_onto_newer_remote_and_keeps_fresh_site(self):
+        import subprocess
+        from screener import history
+        tmp = Path(tempfile.mkdtemp())
+        git = lambda cwd, *a: subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *a], cwd=cwd,
+                                             check=True, capture_output=True, text=True).stdout
+        subprocess.run(['git', 'init', '-q', '--bare', '-b', 'main', str(tmp / 'remote.git')], check=True)
+        for name in ('pi', 'dev'):
+            subprocess.run(['git', 'clone', '-q', str(tmp / 'remote.git'), str(tmp / name)], check=True, capture_output=True)
+            for k, v in (('user.name', 't'), ('user.email', 't@t')):
+                git(tmp / name, 'config', k, v)
+        pi, dev = tmp / 'pi', tmp / 'dev'
+        (pi / 'docs').mkdir(); (pi / 'docs' / 'index.html').write_text('old')
+        git(pi, 'add', '.'); git(pi, 'commit', '-qm', 'base'); git(pi, 'push', '-q', 'origin', 'main')
+        # Meanwhile a code merge lands upstream, touching the same generated page.
+        git(dev, 'pull', '-q', 'origin', 'main')
+        (dev / 'code.py').write_text('new code'); (dev / 'docs' / 'index.html').write_text('stopgap')
+        git(dev, 'add', '.'); git(dev, 'commit', '-qm', 'merge'); git(dev, 'push', '-q', 'origin', 'main')
+        # The report machine (behind by one commit) files a run.
+        public = tmp / 'public'; public.mkdir()
+        (public / 'index.html').write_text('fresh'); (public / 'latest.json').write_text('{}')
+        hist = self.history()
+        (pi / 'history' / 'AAPL').mkdir(parents=True); (pi / 'history' / 'AAPL' / '2026-10-28_004556.md').write_text('run')
+        with mock.patch.multiple(history, ROOT=pi, PUBLIC=public, SITE=pi / 'docs', HISTORY=hist):
+            self.assertIsNone(history.git_commit(1793000000, 1))
+        git(dev, 'pull', '-q', 'origin', 'main')
+        self.assertEqual((dev / 'docs' / 'index.html').read_text(), 'fresh')   # report's copy wins
+        self.assertTrue((dev / 'history' / 'AAPL' / '2026-10-28_004556.md').exists())
+        self.assertEqual((pi / 'code.py').read_text(), 'new code')              # report machine caught up
+        self.assertIn('merge', git(dev, 'log', '--format=%s'))
+
     def test_progress_silent_unless_enabled(self):
         buf = io.StringIO()
         with mock.patch.dict(os.environ, {'SCREENER_PROGRESS': ''}), redirect_stderr(buf):
