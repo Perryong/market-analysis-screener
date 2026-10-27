@@ -88,7 +88,7 @@ def git_commit(now, count):
     msg = f"history: {datetime.fromtimestamp(now, SGT):%Y-%m-%d %H:%M} ({count} symbols)"
     try:
         try:
-            site = publish_site()
+            site = publish_site(PUBLIC, SITE, HISTORY)
         except (OSError, ValueError) as exc:  # the site is best-effort; history still commits
             site, msg = [], msg + f" · site not updated: {exc}"
         subprocess.run(["git", "add", "history/", *site], cwd=ROOT, check=True, capture_output=True, timeout=60)
@@ -96,6 +96,13 @@ def git_commit(now, count):
         if staged.returncode == 0:
             return None  # nothing new staged
         subprocess.run(["git", "commit", "-q", "-m", msg], cwd=ROOT, check=True, capture_output=True, timeout=60)
+        # Catch up with commits pushed from elsewhere (code merges) so the push is never rejected.
+        # The commit only holds new history files and generated docs/, so on overlap keep ours (-X theirs).
+        pull = subprocess.run(["git", "pull", "-q", "--rebase", "--autostash", "-X", "theirs", "origin", "main"],
+                              cwd=ROOT, capture_output=True, text=True, timeout=120)
+        if pull.returncode:
+            subprocess.run(["git", "rebase", "--abort"], cwd=ROOT, capture_output=True, timeout=60)
+            return f"git history: pull failed, committed locally only: {pull.stderr.strip()[:200]}"
         subprocess.run(["git", "push", "-q", "origin", "main"], cwd=ROOT, check=True, capture_output=True, timeout=120)
         return None
     except Exception as exc:
