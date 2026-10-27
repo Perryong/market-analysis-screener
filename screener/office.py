@@ -13,6 +13,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .shared import atomic_text
+
 ROOT = Path(__file__).resolve().parent.parent
 HISTORY = ROOT / 'history'
 # Live scan only; reports (Telegram send + git push) stay on the command line.
@@ -20,10 +22,11 @@ JOBS = {'scan': ['once']}
 PAGE = Path(__file__).with_name('office.html')  # read per request, so edits show on reload
 STAMP = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{6}$')
 COMBINED = re.compile(r'COMBINED \([^)]*\): (\w+)')
+MARKET = {'BINANCE:': 'crypto', 'OANDA:': 'metals'}
 
 
 def _parse(text):
-    signal = combined = None
+    signal = combined = market = None
     read, section = [], None
     for line in text.splitlines():
         if line.startswith('**Signal:**'):
@@ -31,6 +34,9 @@ def _parse(text):
         elif line.startswith('**COMBINED'):
             m = COMBINED.search(line)
             combined = m.group(1) if m else None
+        elif 'tradingview.com/chart/?symbol=' in line:
+            sym = line.split('symbol=', 1)[1]
+            market = next((m for p, m in MARKET.items() if sym.startswith(p)), 'stocks')
         elif line.startswith('## '):
             section = line[3:].strip()
         elif section in ('Verified read', 'AI read'):
@@ -38,7 +44,8 @@ def _parse(text):
                 section = None
             elif line.strip():
                 read.append(line.strip())
-    return dict(signal=signal, combined=combined, read=' '.join(read))
+    status = signal.split(' · ')[1] if signal and signal.count(' · ') else None
+    return dict(signal=signal, combined=combined, market=market, status=status, read=' '.join(read))
 
 
 def calendar(history=HISTORY):
@@ -50,7 +57,8 @@ def calendar(history=HISTORY):
         info = _parse(md.read_text(encoding='utf-8', errors='replace'))
         run = runs.setdefault(md.stem, dict(stamp=md.stem, date=md.stem[:10],
                                             time=md.stem[11:13] + ':' + md.stem[13:15], symbols=[], counts={}))
-        run['symbols'].append(dict(symbol=md.parent.name, combined=info['combined'], signal=info['signal']))
+        run['symbols'].append(dict(symbol=md.parent.name, combined=info['combined'], signal=info['signal'],
+                                   market=info['market'], status=info['status']))
         key = info['combined'] or 'OTHER'
         run['counts'][key] = run['counts'].get(key, 0) + 1
     for run in runs.values():
@@ -66,6 +74,17 @@ def run_detail(stamp, history=HISTORY):
         info = _parse(md.read_text(encoding='utf-8', errors='replace'))
         out.append(dict(info, symbol=md.parent.name, path=str(md.relative_to(history.parent))))
     return dict(stamp=stamp, symbols=out)
+
+
+def export(out, history=HISTORY):
+    """Static, read-only office for GitHub Pages: page + calendar.json + runs/<stamp>.json."""
+    out = Path(out)
+    runs = calendar(history)
+    for run in runs:
+        atomic_text(out / 'runs' / f"{run['stamp']}.json", json.dumps(run_detail(run['stamp'], history)))
+    atomic_text(out / 'calendar.json', json.dumps(runs))
+    atomic_text(out / 'index.html', PAGE.read_text().replace('<script>', '<script>window.OFFICE_STATIC=1;</script><script>', 1))
+    return len(runs)
 
 
 class Office:

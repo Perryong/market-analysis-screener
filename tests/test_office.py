@@ -61,6 +61,32 @@ class OfficeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             office.run_detail('../../etc/passwd', self.history())
 
+    def test_export_builds_static_read_only_site(self):
+        hist = self.history()
+        (hist / 'XRPUSDT' / '2026-10-27_004556.md').write_text(
+            MD.format(sym='XRPUSDT', comb='SELL', heading='AI read') + 'https://www.tradingview.com/chart/?symbol=BINANCE:XRPUSDT&interval=240\n')
+        out = hist.parent / 'site'
+        self.assertEqual(office.export(out, hist), 2)
+        page = (out / 'index.html').read_text()
+        self.assertIn('window.OFFICE_STATIC=1', page)
+        runs = json.loads((out / 'calendar.json').read_text())
+        xrp = next(s for s in runs[0]['symbols'] if s['symbol'] == 'XRPUSDT')
+        self.assertEqual((xrp['market'], xrp['status'], xrp['combined']), ('crypto', 'INVALIDATED', 'SELL'))
+        detail = json.loads((out / 'runs' / '2026-10-27_004556.json').read_text())
+        self.assertEqual(len(detail['symbols']), 2)
+
+    def test_publish_site_copies_dashboard_and_office(self):
+        from screener import history
+        root = Path(tempfile.mkdtemp())
+        public, site = root / 'public', root / 'docs'
+        public.mkdir(); site.mkdir()
+        (public / 'index.html').write_text('<a href="office/">')
+        (public / 'latest.json').write_text('{}')
+        paths = history.publish_site(public, site, self.history())
+        self.assertEqual(paths, ['docs/index.html', 'docs/latest.json', 'docs/office/'])
+        self.assertEqual((site / 'latest.json').read_text(), '{}')
+        self.assertTrue((site / 'office' / 'calendar.json').exists())
+
     def test_progress_silent_unless_enabled(self):
         buf = io.StringIO()
         with mock.patch.dict(os.environ, {'SCREENER_PROGRESS': ''}), redirect_stderr(buf):

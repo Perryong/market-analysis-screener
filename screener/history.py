@@ -4,6 +4,7 @@ Each report run writes one <timestamp>.md + <timestamp>.png per symbol under
 history/<SYM>/, then git add/commit/push the whole history/ tree (best-effort —
 a git failure never blocks the Telegram send). Read-only market data.
 """
+import shutil
 import subprocess
 import json
 from datetime import datetime, timezone, timedelta
@@ -66,11 +67,31 @@ def write(symbol, fields, png, now):
     return md_path
 
 
+PUBLIC = ROOT / ".screener" / "live" / "public"
+SITE = ROOT / "docs"  # GitHub Pages source
+
+
+def publish_site(public=PUBLIC, site=SITE, history=HISTORY):
+    """Copy the latest dashboard to docs/ and rebuild the read-only office there. Returns paths to stage."""
+    from .office import export
+    paths = []
+    for name in ("index.html", "latest.json"):
+        if (public / name).exists():
+            shutil.copyfile(public / name, site / name)
+            paths.append(f"docs/{name}")
+    export(site / "office", history)
+    return paths + ["docs/office/"]
+
+
 def git_commit(now, count):
-    """Stage, commit and push history/. Returns an error string, or None on success/nothing-new."""
+    """Stage, commit and push history/ (+ the Pages site). Returns an error string, or None on success/nothing-new."""
     msg = f"history: {datetime.fromtimestamp(now, SGT):%Y-%m-%d %H:%M} ({count} symbols)"
     try:
-        subprocess.run(["git", "add", "history/"], cwd=ROOT, check=True, capture_output=True, timeout=60)
+        try:
+            site = publish_site()
+        except (OSError, ValueError) as exc:  # the site is best-effort; history still commits
+            site, msg = [], msg + f" · site not updated: {exc}"
+        subprocess.run(["git", "add", "history/", *site], cwd=ROOT, check=True, capture_output=True, timeout=60)
         staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT, capture_output=True, timeout=30)
         if staged.returncode == 0:
             return None  # nothing new staged

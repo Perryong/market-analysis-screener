@@ -21,6 +21,8 @@ def publish(store, out, mode, now):
     payload = dict(version=1,generated_at=now,mode=mode,results=results,trades=store.trades(),events=events)
     atomic_text(out/'latest.json',json_text(payload))
     atomic_text(out/'index.html',render(payload))
+    from .office import export
+    export(out/'office')  # read-only office beside the dashboard (linked from it)
     return payload
 
 
