@@ -36,6 +36,10 @@ A live view of the pipeline: Feed, Engine, Charts, Analyst and Publisher work at
 live scan runs, and a calendar (press `C`) shows every report run from `history/`. RUN starts a live
 scan; reports (Telegram + git push) stay on the command line. Page: `screener/office.html`; server: `screener/office.py`.
 
+A read-only copy is published on GitHub Pages at `docs/office/` (linked from the dashboard). It
+replays the newest report run and shows the same calendar. Each report run refreshes it, together
+with `docs/index.html` and `docs/latest.json`, in the same commit as `history/`.
+
 ## Configure
 
 Edit `screener.json`: watchlist, strategy thresholds and paper-trading budget.

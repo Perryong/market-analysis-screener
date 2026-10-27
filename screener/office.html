@@ -229,6 +229,8 @@ kbd{font:600 9px var(--mono);border:1px solid currentColor;border-radius:4px;pad
 
 <script>
 'use strict';
+// Served by `screener office` it runs live scans; exported for GitHub Pages it is read-only and replays history.
+const STATIC=!!window.OFFICE_STATIC,API=STATIC?{cal:'calendar.json',run:s=>'runs/'+s+'.json'}:{cal:'/calendar.json',run:s=>'/calendar/'+s+'.json'};
 const NS='http://www.w3.org/2000/svg',$=s=>document.querySelector(s);
 function el(tag,attrs={},...kids){const svg=tag.startsWith('s:'),n=svg?document.createElementNS(NS,tag.slice(2)):document.createElement(tag);
   for(const[k,v]of Object.entries(attrs)){if(v==null)continue;if(k==='text')n.textContent=v;else if(k==='style'&&typeof v==='object')Object.assign(n.style,v);
@@ -476,7 +478,7 @@ function miniGraph(){const g=$('#mini');let seed=3;const rnd=()=>(seed=(seed*168
   n.forEach((a,i)=>n.forEach((b,j)=>{if(j>i&&Math.hypot(a[0]-b[0],a[1]-b[1])<22)g.append(el('s:line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'#9cc3b3','stroke-width':.6}))}));
   n.forEach((a,i)=>g.append(el('s:circle',{cx:a[0],cy:a[1],r:i%4?1.3:2.2,fill:Object.values(DEPTS)[i%5].c})))}
 miniGraph();
-async function loadHistory(){runs=await(await fetch('/calendar.json')).json();
+async function loadHistory(){runs=await(await fetch(API.cal)).json();
   hubCount.textContent=runs.length+' runs';$('#jruns').textContent=runs.length+' runs';
   if(runs.length){const r=runs[0];$('#jlast').innerHTML='';$('#jlast').append('Last run ',el('b',{text:pretty(r)}),` · ${r.symbols.length} reads · ${tally(r)}`)}
   else $('#jlast').textContent='No report runs in history/ yet.';
@@ -528,7 +530,7 @@ async function openRun(r,anchor){cal.sel=r.stamp;const pop=$('#pop');
   pop.replaceChildren(el('div',{class:'ph'},el('span',{text:'Run · '+pretty(r)}),el('span',{class:'cap',text:r.symbols.length+' symbols'}),el('button',{text:'✕','aria-label':'Close',onclick:closePop})),
     el('div',{class:'cap',style:{color:'var(--muted)'},text:'Loading reads…'}));place(pop,anchor);
   document.querySelectorAll('.ev').forEach(e=>e.classList.remove('sel'));if(anchor.classList.contains('ev'))anchor.classList.add('sel');
-  const det=await(await fetch('/calendar/'+r.stamp+'.json')).json();
+  const det=await(await fetch(API.run(r.stamp))).json();
   pop.replaceChildren(pop.firstChild,...det.symbols.map(s=>el('div',{class:'sym'+(cal.q&&s.symbol.includes(cal.q)?' hit':'')},
     el('div',{class:'h'},el('b',{text:s.symbol}),el('span',{class:'badge',style:{'--c':COLORS[s.combined]||'var(--muted)'},text:s.combined||'—'})),
     s.signal?el('div',{class:'sg',text:s.signal}):null,s.read?el('p',{text:s.read}):null)));
@@ -550,5 +552,15 @@ document.addEventListener('keydown',e=>{if(e.target.matches('input,select,textar
   if(e.key==='Escape'){$('#pop').hidden?closeCal():closePop()}else if(e.key==='ArrowLeft')shift(-1);else if(e.key==='ArrowRight')shift(1);
   else if(e.key==='w')setMode('week');else if(e.key==='m')setMode('month');else if(e.key==='t'){cal.cursor=new Date();renderCal()}});
 
-build();paintCards();connect();loadHistory();
+// Replay the newest history run through the same event queue a live scan uses.
+function replay(){const r=runs[0];if(!r||playing)return;const ev=[{type:'start',job:'replay'}];
+  for(const s of r.symbols){const m=s.market||undefined;
+    ev.push({type:'step',agent:'feed',action:'fetch',symbol:s.symbol,market:m},{type:'step',agent:'engine',action:'evaluate',symbol:s.symbol,market:m,status:s.status||undefined},
+      {type:'step',agent:'analyst',action:'read',symbol:s.symbol,market:m,status:s.combined||undefined},{type:'step',agent:'charts',action:'draw',symbol:s.symbol,market:m},
+      {type:'step',agent:'publisher',action:'archive',symbol:s.symbol,market:m})}
+  ev.push({type:'step',agent:'publisher',action:'publish'},{type:'end',job:'replay',code:0});queue.push(...ev);pump()}
+if(STATIC){$('#run').textContent='REPLAY';$('.jobpill').textContent='Latest run';$('#hint').textContent='Replay of the newest report';
+  $('#run').onclick=replay;setRunning(false,'Read-only · GitHub Pages');
+  build();paintCards();loadHistory().then(()=>setTimeout(replay,900))}
+else{build();paintCards();connect();loadHistory()}
 </script></body></html>
