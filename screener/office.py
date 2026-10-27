@@ -15,8 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HISTORY = ROOT / 'history'
-# The real `report` (Telegram send + git push) is deliberately not runnable from a click.
-JOBS = {'demo': ['demo'], 'scan': ['once'], 'report': ['report', '--dry-run']}
+# Live scan only; reports (Telegram send + git push) stay on the command line.
+JOBS = {'scan': ['once']}
 PAGE = Path(__file__).with_name('office.html')  # read per request, so edits show on reload
 STAMP = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{6}$')
 COMBINED = re.compile(r'COMBINED \([^)]*\): (\w+)')

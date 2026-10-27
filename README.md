@@ -33,9 +33,8 @@ python -m screener office          # → http://127.0.0.1:8765 (localhost only)
 ```
 
 A live view of the pipeline: Feed, Engine, Charts, Analyst and Publisher work at their desks as a
-job runs, and a calendar (press `C`) shows every report run from `history/`. The RUN button offers
-Demo (offline), Live scan and Report dry run only; the real report (Telegram + git push) stays on
-the command line. Page: `screener/office.html`; server: `screener/office.py`.
+live scan runs, and a calendar (press `C`) shows every report run from `history/`. RUN starts a live
+scan; reports (Telegram + git push) stay on the command line. Page: `screener/office.html`; server: `screener/office.py`.
 
 ## Configure
 
