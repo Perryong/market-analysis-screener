@@ -74,16 +74,16 @@ class OfficeTest(unittest.TestCase):
     def test_one_job_at_a_time_and_unknown_jobs_rejected(self):
         o = office.Office(Path('screener.json'))
         with self.assertRaises(KeyError):
-            o.start('report-for-real')
+            o.start('demo')  # only the live scan is runnable from the page
         fake = mock.Mock()
         fake.poll.return_value = None
         fake.stderr = iter(['{"agent":"feed","action":"fetch","symbol":"X"}\n', 'boom\n'])
         fake.wait.return_value = 1
         with mock.patch.object(office.subprocess, 'Popen', return_value=fake) as popen:
-            self.assertTrue(o.start('demo'))
+            self.assertTrue(o.start('scan'))
             self.assertFalse(o.start('scan'))  # first job still "running"
             cmd = popen.call_args[0][0]
-            self.assertEqual(cmd[1:4], ['-m', 'screener', 'demo'])
+            self.assertEqual(cmd[1:4], ['-m', 'screener', 'once'])
             self.assertEqual(popen.call_args[1]['env']['SCREENER_PROGRESS'], '1')
         for _ in range(50):
             if o.log and o.log[-1]['type'] == 'end':

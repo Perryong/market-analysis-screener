@@ -58,9 +58,7 @@ kbd{font:600 9px var(--mono);border:1px solid currentColor;border-radius:4px;pad
 /* ---------- right panel ---------- */
 .side{border-left:1px solid var(--line);background:var(--bg);padding:16px 18px;display:flex;flex-direction:column;gap:14px;min-height:0;overflow:hidden}
 .taskbar{display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line2);border-radius:999px;padding:6px 6px 6px 8px}
-.taskbar select{appearance:none;border:1px solid var(--line2);background:var(--paper);border-radius:999px;padding:7px 26px 7px 22px;font:600 10px var(--sans);letter-spacing:.14em;
- background-image:radial-gradient(circle,var(--jc,#4f9bd9) 3.5px,transparent 4px),linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);
- background-position:4px 50%,calc(100% - 13px) 52%,calc(100% - 9px) 52%;background-size:16px 16px,4px 4px,4px 4px;background-repeat:no-repeat;cursor:pointer;color:var(--ink)}
+.jobpill{border:1px solid var(--line2);border-radius:999px;padding:7px 12px 7px 22px;white-space:nowrap;background:radial-gradient(circle,#e0a43a 3.5px,transparent 4px) 4px 50%/16px 16px no-repeat var(--paper)}
 .taskbar .hint{flex:1;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .run{border:0;background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 16px;font:700 10px var(--sans);letter-spacing:.16em;cursor:pointer}
 .run:disabled{opacity:.35;cursor:not-allowed}
@@ -178,10 +176,8 @@ kbd{font:600 9px var(--mono);border:1px solid currentColor;border-radius:4px;pad
 
   <aside class="side">
     <div class="taskbar">
-      <select id="job" class="cap" aria-label="Job">
-        <option value="demo">Demo</option><option value="scan">Live scan</option><option value="report">Report · dry</option>
-      </select>
-      <span class="hint" id="hint"></span>
+      <span class="jobpill cap">Live scan</span>
+      <span class="hint" id="hint">Stocks · crypto · metals</span>
       <button class="run" id="run">RUN</button>
     </div>
     <div class="journal">
@@ -197,7 +193,7 @@ kbd{font:600 9px var(--mono);border:1px solid currentColor;border-radius:4px;pad
       <button class="f cap wait" data-f="failed" aria-pressed="false">Failed<b id="c-failed">0</b></button>
       <button class="f cap" data-f="done" aria-pressed="false">Done<b id="c-done">0</b></button>
     </div>
-    <div class="tasks" id="tasks" aria-live="polite"><div class="empty">No tasks yet. Pick a job and press <b>RUN</b>, and the agents pick it up desk by desk.</div></div>
+    <div class="tasks" id="tasks" aria-live="polite"><div class="empty">No tasks yet. Press <b>RUN</b> to scan, and the agents pick it up desk by desk.</div></div>
     <div class="note">market-analysis-screener · read-only research · no orders placed</div>
   </aside>
 </div>
@@ -427,7 +423,7 @@ function paintTasks(){
   const c={all:list.length,doing:0,done:0,failed:0};list.forEach(t=>c[t.state]++);
   for(const k in c)$('#c-'+k).textContent=c[k];
   const shown=list.filter(t=>filter==='all'||t.state===filter);
-  if(!shown.length){box.replaceChildren(el('div',{class:'empty',text:list.length?'Nothing in this filter.':'No tasks yet. Pick a job and press RUN, and the agents pick it up desk by desk.'}));return}
+  if(!shown.length){box.replaceChildren(el('div',{class:'empty',text:list.length?'Nothing in this filter.':'No tasks yet. Press RUN to scan, and the agents pick it up desk by desk.'}));return}
   box.replaceChildren(...shown.map(t=>{const d=DEPTS[t.dept];
     const title=t.state==='failed'?`${t.sym} · ${t.action||'failed'}`:t.state==='done'?`${t.sym}${t.status?' · '+t.status:t.key.startsWith('__')?' · '+t.action:''}`:`${t.sym} · ${VERB[t.action]||t.action}${t.status&&t.action==='evaluate'?' → '+t.status:''}`;
     return el('div',{class:'task '+t.state+(Date.now()-(t.born||0)<350?' new':'')},el('span',{class:'pct',text:(t.state==='done'?100:t.pct)+'%'}),
@@ -441,7 +437,7 @@ setInterval(paintTasks,10000);
 const queue=[];let playing=false;
 function pump(){if(playing)return;playing=true;(function next(){const ev=queue.shift();if(!ev){playing=false;return}
   handle(ev);paintCards();setTimeout(next,ev.type==='step'?(queue.length>40?140:520):60)})()}
-function setRunning(on,label){$('#run').disabled=on;$('#job').disabled=on;
+function setRunning(on,label){$('#run').disabled=on;
   $('#state').innerHTML='';$('#state').append(el('span',{class:'dot',style:{background:on?'#e0a43a':'var(--buy)'}}),label)}
 function handle(ev){
   if(ev.type==='start'){resetStats();job=ev.job;$('#mode').textContent=ev.job.toUpperCase();setRunning(true,'Running '+ev.job);paintTasks()}
@@ -453,16 +449,12 @@ function handle(ev){
     for(const t of tasks.values())if(t.state==='doing')t.state=ok||t.pct>25?'done':'failed';
     if(!ok&&![...tasks.values()].some(t=>t.state==='failed')){const t=tasks.get('__error')||{key:'__error',sym:'Job failed',dept:'publisher',pct:0};Object.assign(t,{action:ev.error||('exit '+ev.code),state:'failed',t:Date.now()});tasks.set('__error',t)}
     if(ok&&!tasks.size)tasks.set('__none',{key:'__none',sym:'Nothing to process',dept:'publisher',state:'done',pct:100,born:Date.now(),t:Date.now(),
-      action:ev.job==='report'?'no scanned symbols yet · run Live scan first':'no symbols were due'});
+      action:'no symbols were due'});
     const some=[...tasks.values()].some(t=>t.state==='done');
     paintTasks();setRunning(false,ok?'Idle · '+ev.job+' done':(some?'Done with errors · ':'Failed · ')+ev.job);$('#mode').textContent=ok?'DONE':some?'PARTIAL':'FAILED';
     setTimeout(()=>hubAct.setAttribute('opacity',0),1800);loadHistory()}
 }
-const HINTS={demo:'3 synthetic pairs',scan:'Stocks · crypto · metals',report:'Reads only, no sends'};
-const JC={demo:'#4f9bd9',scan:'#e0a43a',report:'#38a889'};
-function syncJob(){const j=$('#job').value;$('#hint').textContent=HINTS[j];$('#job').style.setProperty('--jc',JC[j])}
-$('#job').onchange=syncJob;syncJob();
-$('#run').onclick=async()=>{const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job:$('#job').value})});
+$('#run').onclick=async()=>{const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job:'scan'})});
   if(!r.ok){const e=await r.json().catch(()=>({}));tasks.set('__error',{key:'__error',sym:'Not started',dept:'publisher',action:e.error||String(r.status),state:'failed',pct:0,t:Date.now()});paintTasks()}};
 async function connect(){const s=await(await fetch('/status')).json();if(s.running)setRunning(true,'Running '+s.job);
   const es=new EventSource('/events?from='+s.from_seq);es.onmessage=m=>{queue.push(JSON.parse(m.data));pump()}}
