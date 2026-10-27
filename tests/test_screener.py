@@ -337,6 +337,24 @@ class ScreenerTest(unittest.TestCase):
                 replay.replay(store,bundle,config['strategy'],config['paper'])
             store.close()
 
+    def test_state_saved_with_legacy_full_bar_fingerprint_still_loads(self):
+        # Journals written before a88b1da hashed whole bars; they must not be stuck as revised forever.
+        from screener.shared import fingerprint
+        engine, settings, bundle, saved = self.setup()
+        legacy = copy.deepcopy(saved)
+        legacy['setup_anchor'] = fingerprint(next(b for b in bundle['setup'] if b['end'] == saved['setup_end']))
+        legacy['hour_anchor'] = fingerprint(next(b for b in bundle['hourly'] if b['end'] == saved['hour_end']))
+        for name, bars in (('setup_evidence', bundle['setup']), ('hour_evidence', bundle['hourly'])):
+            ends = {b['end']: b for b in bars}
+            legacy[name] = [(t, fingerprint(ends[t])) for t, _ in saved.get(name, [])]
+        result, migrated, _ = engine.evaluate(copy.deepcopy(bundle), legacy, settings, 374403)
+        self.assertEqual(result['status'], 'CONFIRMED')
+        self.assertEqual(migrated['setup_anchor'], saved['setup_anchor'])  # re-saved in the new format
+        bad = copy.deepcopy(bundle)
+        next(b for b in bad['setup'] if b['end'] == saved['setup_end'])['high'] += 1
+        with self.assertRaisesRegex(ValueError, 'revised'):
+            engine.evaluate(bad, legacy, settings, 374403)
+
     def test_frozen_trigger_checked_after_cursor_advances(self):
         engine,settings,bundle,saved=self.setup()
         bundle['setup'].append(bar(26,112,114,111,113,100,14400))
