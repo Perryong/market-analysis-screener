@@ -38,6 +38,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ADDITIONAL_CHAT_IDS: ${{ secrets.TELEGRAM_ADDITIONAL_CHAT_IDS }}
+          # Stocks (Alpaca) and metals (OANDA) are DATA_UNAVAILABLE without these.
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          OANDA_API_TOKEN: ${{ secrets.OANDA_API_TOKEN }}
         run: |
           notify=''
           if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then notify='--notify'; fi

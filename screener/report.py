@@ -3,17 +3,21 @@
 Read-only analysis: reads the screener journal for signals, reuses the cached setup
 (4H crypto/metals, daily stocks) + 1H candles via MarketData, computes an EMA50
 direction, a 1H trend/momentum/FVG confluence verdict, and a DeepSeek AI read — the
-previous read is fed back in so each run compares against its own history. Sends one
-text card per symbol to the configured Telegram chat. No broker orders.
+AI selects verified facts, while comparisons use recorded evidence rather than
+previous prose. Sends one card per symbol to the configured Telegram chat. No broker orders.
 """
 
 import html
 import json
 import os
 import urllib.request
+import time
+from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 
-from .shared import DataError, send
+from .shared import DataError, progress, send
+from .reporting import number as fmt, fact_catalog, verified_read, evidence_notes, gap_events, evidence_signature
+from .report_preview import preview_history
 from .feeds import MarketData
 from .charts import results, signal_of, crypto_bars, stock_bars, metal_bars
 from .runtime import Cache
@@ -21,19 +25,11 @@ from . import pwchart
 from . import history
 
 SGT = timezone(timedelta(hours=8))
-ACTIVE = ("CONFIRMED", "DEVELOPING", "RETESTED", "ENTRY_ELIGIBLE")
+ACTIVE = ("CONFIRMED", "RETESTED", "ENTRY_ELIGIBLE")
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-
-
-def fmt(v):
-    if v is None:
-        return "—"
-    if abs(v) >= 1:
-        return f"{v:,.2f}"
-    return f"{v:,.4f}"
 
 
 def ema(vals, n):
@@ -106,19 +102,17 @@ def combined(d_up, s1):
 def ai_read(symbol, prev, ctx):
     if not DEEPSEEK_KEY:
         return None
-    sys_msg = (
-        "You are a concise market analyst. Write a short 'AI read' (3-5 sentences) "
-        "grounded ONLY in the data given. State the bias, the key levels, and the "
-        "invalidation condition. When a previous read is given, compare against it: "
-        "say what changed (level breaks, trend flips, gap fills) and confirm or revise "
-        "the bias. Start directly with the analysis text — no title, no header, no "
-        "markdown. No hedging, no disclaimers."
-    )
-    user = f"Symbol: {symbol}\nPrevious read: {prev or '(none)'}\nNew data:\n{ctx}\n\nWrite the updated AI read."
+    sys_msg = ('Select 1 to 5 useful optional fact IDs from the supplied verified catalogue. '
+               'Return only JSON: {"fact_ids": ["price"]}. No other keys or prose. '
+               'Mandatory strategy, eligibility and evidence facts are always rendered by the application. '
+               'Never invent IDs, price events, fills, entries or instructions.')
+    # Previous model prose is deliberately excluded: only recorded facts are evidence.
+    user = json.dumps(dict(symbol=symbol, facts=ctx), allow_nan=False)
     payload = {
         "model": DEEPSEEK_MODEL,
         "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": user}],
-        "temperature": 0.4,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
         "max_tokens": 320,
     }
     req = urllib.request.Request(
@@ -127,7 +121,7 @@ def ai_read(symbol, prev, ctx):
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + DEEPSEEK_KEY},
     )
     r = json.loads(urllib.request.urlopen(req, timeout=60).read())
-    return r["choices"][0]["message"]["content"].strip()
+    return json.loads(r["choices"][0]["message"]["content"])
 
 
 def tv_link(symbol, market):
@@ -156,7 +150,10 @@ def pct_15m(market, symbol, headers, oanda, now):
         return None
 
 
-def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached_read=False):
+def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached_read=False,
+         *, now=None, bundle=None):
+    now = time.time() if now is None else now
+    bundle = bundle or {}
     sig = signal_of(r)
     status = r.get("status")
     side = (sig or {}).get("side")
@@ -164,6 +161,8 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached
     entry = (sig or {}).get("entry")
     stop = (sig or {}).get("stop")
     target = (sig or {}).get("target")
+    if status == 'ENTRY_ELIGIBLE':
+        entry, stop, target = (r.get(k) for k in ('entry', 'stop', 'target'))
 
     tf = "1D" if market == "stocks" else "4H"
     dir_label = "Daily direction" if market == "stocks" else "4H direction"
@@ -178,7 +177,8 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached
     side_label = "BUY" if side == "LONG" else ("SELL" if side == "SHORT" else "—")
     pct_txt = f"{pct:+.2f}%" if pct is not None else "—"
     if entry and status in ACTIVE and side in ("LONG", "SHORT"):
-        top = f"{symbol} · {status} · {side_label} entry {fmt(entry)} · stop {fmt(stop)} · target {fmt(target)} · 15m · {fmt(cur)} · {pct_txt}"
+        label = 'engine-assessed' if status == 'ENTRY_ELIGIBLE' else 'conditional plan'
+        top = f"{symbol} · {status} · {side_label} {label} entry {fmt(entry)} · stop {fmt(stop)} · target {fmt(target)} · 15m · {fmt(cur)} · {pct_txt}"
     elif status == "WATCHING" and side in ("LONG", "SHORT"):
         lvl = upper if side == "LONG" else lower
         top = f"{symbol} · WATCHING · watch {side_label} @ {fmt(lvl)} · 15m · {fmt(cur)} · {pct_txt}"
@@ -197,7 +197,7 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached
 
     lines = [
         top,
-        f"{datetime.now(SGT):%Y-%m-%d %H:%M:%S} +08",
+        f"{datetime.fromtimestamp(now, SGT):%Y-%m-%d %H:%M:%S} +08",
         "",
         f"{dir_label}: {d_txt}",
         "",
@@ -234,37 +234,61 @@ def card(r, symbol, market, setup, hourly, cur, store, dry_run, pct=None, cached
     lines.append("Analysis only · No orders placed")
     lines.append(tv_link(symbol, market))
 
-    ctx = (
-        f"{symbol} · {side_label} ({status})\n"
-        f"{tf} direction: {d_txt} · Combined ({tf}+1H): {comb}\n"
-        f"Price: {fmt(cur)} · Upper pivot {fmt(upper)} · Lower pivot {fmt(lower)}\n"
-        f"1H trend {'up' if trend_up else 'down'} · last 1H {fmt(closed['open'])}→{fmt(closed['close'])} ({chg:+.2f}%)\n"
-        f"Open FVGs: {[(t, round(bot, 6), round(top_, 6)) for t, bot, top_ in fvgs_near]}\n"
-        f"Entry {fmt(entry)} · Stop {fmt(stop)} · Target {fmt(target)} · Regime {r.get('regime')}"
-    )
-    key = f"airead:{market}:{symbol}"
-    prev = store.get(key)
-    if cached_read:
-        read = prev          # reuse the latest cached AI read — no fresh DeepSeek call
-        prev = None          # no "Previous read" block in cached mode
-    else:
-        read = None if dry_run else ai_read(symbol, prev, ctx)
-        if read:
-            store.put(key, read)
+    key = f"report_evidence:v1:{market}:{symbol}"
+    previous = store.get(key) or {}
+    quote = bundle.get('quote') or {}
+    price_kind = 'quote' if quote else 'candle_close'
+    if market == 'metals':
+        price_kind = 'candle_close'  # Current metals feed uses the last H1 close, not a quote.
+    snapshot = deepcopy(dict(schema_version=1, observed_at=now, symbol=symbol, market=market,
+                    full_precision=True, source=bundle.get('source', r.get('source', 'unknown')),
+                    market_open=bundle.get('market_open'), quote=quote,
+                    price=dict(value=cur, time=quote.get('time') if quote else closed['end'], kind=price_kind),
+                    result=r, setup=setup, hourly=hourly,
+                    candle_ends=dict(setup=setup[-1]['end'], hourly=closed['end']),
+                    tf=tf, direction=d_txt, combined=comb, trend_up=trend_up,
+                    fvgs_near=fvgs_near, previous=previous.get('evidence')))
+    evidence = {k: snapshot[k] for k in ('price', 'candle_ends', 'fvgs_near')}
+    # Ignore scan/quote timestamps when deciding whether market facts changed.
+    signature = evidence_signature(snapshot)
+    snapshot['unchanged'] = previous.get('signature') == signature
+    mandatory, optional = fact_catalog(snapshot)
+    selection, error = None, None
+    if snapshot['unchanged']:
+        selection = previous.get('selection')
+    elif not dry_run and not cached_read and DEEPSEEK_KEY:
+        try:
+            selection = ai_read(symbol, None, dict(mandatory=mandatory, optional=optional))
+            if selection is None:
+                selection = {}  # A model returning JSON null is invalid, not an absent AI call.
+        except (OSError, ValueError, KeyError, TypeError, IndexError):
+            error = 'fallback: AI unavailable or malformed response'
+    read, mode = verified_read(snapshot, selection)
+    if error:
+        mode = error
+    snapshot['gap_events'] = gap_events(snapshot)
+    snapshot['read_mode'] = mode
+    snapshot['model'] = DEEPSEEK_MODEL if mode == 'AI-selected verified facts' else None
+    snapshot['selection'] = selection if mode == 'AI-selected verified facts' else None
+    data_note = '; '.join(evidence_notes(snapshot)) or 'Current matched evidence'
+    if not dry_run and not cached_read:
+        store.put(key, dict(signature=signature, evidence=evidence, selection=snapshot['selection']))
+    prev = None
 
     lines.append("")
     if prev:
         lines.append("Previous read:")
         lines.append(prev)
         lines.append("")
-    lines.append("AI read:")
-    lines.append(read if read else ("[dry run — AI read skipped]" if dry_run else "[AI read unavailable]"))
+    lines.append(f"Verified read ({mode}):")
+    lines.append(read)
     fields = dict(
         top=top, dir_label=dir_label, d_txt=d_txt, d_up=d_up, comb_txt=comb_txt,
         price=fmt(cur), upper=fmt(upper), lower=fmt(lower), trend_up=trend_up,
         closed_open=fmt(closed["open"]), closed_close=fmt(closed["close"]), chg=chg,
         fvgs_near=fvgs_near, setup_txt=setup_txt, last_1h=last_1h, last_tf=last_tf,
         prev_read=prev, ai_read=read, tv_link=tv_link(symbol, market), tf=tf,
+        snapshot=snapshot, read_mode=mode, data_note=data_note,
     )
     return "\n".join(lines), fields
 
@@ -283,6 +307,7 @@ def analysis_html(f):
         ("1H closed", f"{f['closed_open']} → {f['closed_close']} ({f['chg']:+.2f}%)", ""),
         ("Open FVG", fvg_txt, ""),
         ("Setup", f["setup_txt"], ""),
+        ("Evidence", f.get('data_note', 'Unavailable'), ""),
     ]
     body = "".join(
         f'<div class="row"><span class="k">{esc(k)}</span><span class="v {cls}">{esc(v)}</span></div>'
@@ -294,7 +319,7 @@ def analysis_html(f):
         '<div class="analysis"><h3>Analysis</h3>' + body
         + '<div class="row"><span class="k">Last completed</span><span class="v">'
         + f"1H {esc(f['last_1h'])} · {f['tf']} {esc(f['last_tf'])}</span></div>"
-        + prev + '<h3>AI read</h3>' + ai
+        + prev + '<h3>Verified read</h3><p class="meta">' + esc(f.get('read_mode', '')) + '</p>' + ai
         + '<p class="meta">Analysis only · No orders placed</p>'
         + f'<p class="meta">{esc(f["tv_link"])}</p></div>'
     )
@@ -330,7 +355,8 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
                 continue
             cur = (bundle.get("quote") or {}).get("price") or hourly[-1]["close"]
             pct = pct_15m(market, sym, headers, oanda, now)
-            text, fields = card(r, sym, market, setup, hourly, cur, store, dry_run, pct)
+            text, fields = card(r, sym, market, setup, hourly, cur, store, dry_run, pct, now=now, bundle=bundle)
+            progress('analyst','read',sym,market=market,status=fields['comb_txt'].split(': ',1)[-1].split(' ')[0])
             if dry_run:
                 print(text)
                 print("\n" + "=" * 60 + "\n")
@@ -347,6 +373,7 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
             if len(bars) < 2:
                 failures.append(f"{sym}: no 1H bars")
                 continue
+            progress('charts','draw',sym,market=market)
             png = pwchart.render_png(pwchart.svg(sym, bars, r, market, source, now, analysis_html(fields)))
             history.write(sym, fields, png, now)
             send(token, chat, fields["top"], png)

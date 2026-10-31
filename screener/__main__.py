@@ -6,13 +6,14 @@ import sys
 import time
 
 from .shared import atomic_text, json_text
-from .shared import DataError, fingerprint
+from .shared import DataError, fingerprint, progress
 from .runtime import Store, validate_config, locked, scan, notify
 from .replay import demo, replay
 from .view import render
 
 
 def publish(store, out, mode, now):
+    progress('publisher','publish')
     results = [json.loads(r[0]) for r in store.db.execute("SELECT value FROM kv WHERE key LIKE 'result:%'")]
     priority = {s:i for i,s in enumerate(('ENTRY_ELIGIBLE','RETESTED','CONFIRMED','DEVELOPING','WATCHING','INVALIDATED','MISSED','EXPIRED','DATA_UNAVAILABLE'))}
     results.sort(key=lambda r:(priority.get(r['status'],99),-r.get('score',0),r['symbol']))
@@ -20,12 +21,14 @@ def publish(store, out, mode, now):
     payload = dict(version=1,generated_at=now,mode=mode,results=results,trades=store.trades(),events=events)
     atomic_text(out/'latest.json',json_text(payload))
     atomic_text(out/'index.html',render(payload))
+    from .office import export
+    export(out/'office')  # read-only office beside the dashboard (linked from it)
     return payload
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('once','tick','demo','replay','export','charts','report'))
+    parser.add_argument('command',choices=('once','tick','demo','replay','export','charts','report','office'))
     parser.add_argument('--config',type=Path,default=Path('screener.json'))
     parser.add_argument('--state-dir',type=Path)
     parser.add_argument('--out',type=Path)
@@ -33,8 +36,26 @@ def main(argv=None):
     parser.add_argument('--symbols',help='Comma-separated override for --market')
     parser.add_argument('--bundle',type=Path,help='Replay input or export output file')
     parser.add_argument('--notify',action='store_true',help='Send fresh transitions to configured Telegram recipients')
-    parser.add_argument('--dry-run',action='store_true',help='Generate without sending (report command: skips AI read)')
+    parser.add_argument('--dry-run',action='store_true',help='Generate without sending (report: verified summary without an AI call)')
+    parser.add_argument('--port',type=int,default=8765,help='office only: localhost port')
+    parser.add_argument('--preview-history',type=Path,help='Report only: local comparison of archived reads; no API calls, sends or commits')
     args = parser.parse_args(argv)
+    if args.preview_history:
+        if args.command != 'report':
+            parser.error('--preview-history is only supported for report')
+        from .report_preview import preview_history
+        try:
+            out = args.out or Path('.screener/report-review')
+            symbols = [s.strip().upper() for s in args.symbols.split(',')] if args.symbols else None
+            count = preview_history(args.preview_history, out, symbols, args.market)
+            print(f'Local review: {count} reports · {(out/"index.html").resolve()}')
+            return 0
+        except (DataError, OSError, ValueError, KeyError, TypeError) as exc:
+            print(f'Preview failed: {exc}', file=sys.stderr)
+            return 1
+    if args.command == 'office':
+        from .office import serve
+        return serve(args.config, args.port)
     mode = args.command if args.command in ('demo','replay') else 'live'
     state_dir = args.state_dir or Path('.screener')/mode
     out = args.out or state_dir/'public'

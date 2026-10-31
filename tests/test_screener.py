@@ -186,8 +186,12 @@ class ScreenerTest(unittest.TestCase):
 
     def test_revised_anchor_and_future_bar_rejected(self):
         engine, settings, bundle, saved = self.setup()
+        # Close/volume revisions are tolerated (Alpaca closing-auction); structural OHLC changes are not.
+        ok = copy.deepcopy(bundle)
+        ok['setup'][-1]['close'] = 112
+        engine.evaluate(ok, saved, settings, 374403)
         bad = copy.deepcopy(bundle)
-        bad['setup'][-1]['close'] = 112
+        bad['setup'][-1]['high'] += 1
         with self.assertRaisesRegex(ValueError, 'revised'):
             engine.evaluate(bad, saved, settings, 374403)
         bad = copy.deepcopy(bundle)
@@ -333,6 +337,24 @@ class ScreenerTest(unittest.TestCase):
                 replay.replay(store,bundle,config['strategy'],config['paper'])
             store.close()
 
+    def test_state_saved_with_legacy_full_bar_fingerprint_still_loads(self):
+        # Journals written before a88b1da hashed whole bars; they must not be stuck as revised forever.
+        from screener.shared import fingerprint
+        engine, settings, bundle, saved = self.setup()
+        legacy = copy.deepcopy(saved)
+        legacy['setup_anchor'] = fingerprint(next(b for b in bundle['setup'] if b['end'] == saved['setup_end']))
+        legacy['hour_anchor'] = fingerprint(next(b for b in bundle['hourly'] if b['end'] == saved['hour_end']))
+        for name, bars in (('setup_evidence', bundle['setup']), ('hour_evidence', bundle['hourly'])):
+            ends = {b['end']: b for b in bars}
+            legacy[name] = [(t, fingerprint(ends[t])) for t, _ in saved.get(name, [])]
+        result, migrated, _ = engine.evaluate(copy.deepcopy(bundle), legacy, settings, 374403)
+        self.assertEqual(result['status'], 'CONFIRMED')
+        self.assertEqual(migrated['setup_anchor'], saved['setup_anchor'])  # re-saved in the new format
+        bad = copy.deepcopy(bundle)
+        next(b for b in bad['setup'] if b['end'] == saved['setup_end'])['high'] += 1
+        with self.assertRaisesRegex(ValueError, 'revised'):
+            engine.evaluate(bad, legacy, settings, 374403)
+
     def test_frozen_trigger_checked_after_cursor_advances(self):
         engine,settings,bundle,saved=self.setup()
         bundle['setup'].append(bar(26,112,114,111,113,100,14400))
@@ -340,7 +362,7 @@ class ScreenerTest(unittest.TestCase):
         bundle['quote']=dict(price=113,time=388803)
         result,saved,_=engine.evaluate(bundle,saved,settings,388803)
         self.assertEqual(result['upper'],110)
-        bundle['setup'][25]['close']=109
+        bundle['setup'][25]['high']+=1
         with self.assertRaisesRegex(ValueError,'revised'):
             engine.evaluate(bundle,saved,settings,388804)
 
@@ -368,7 +390,8 @@ class ScreenerTest(unittest.TestCase):
     def test_alpaca_calendar_handles_dst_and_pagination(self):
         from screener import feeds,runtime
         start=datetime.fromisoformat('2026-09-29T09:30:00-04:00').timestamp()
-        now=start+23460
+        # The final SIP bar is available only after the feed's 15-minute delay.
+        now=start+23460+900
         raw=[dict(t=datetime.fromtimestamp(start+i*1800).astimezone().isoformat(),o=100,h=101,l=99,c=100,v=100)
              for i in range(13)]
         payloads=[dict(bars={'TEST':raw[:7]},next_page_token='page2'),dict(bars={'TEST':raw[7:]},next_page_token=None),

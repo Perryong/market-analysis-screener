@@ -26,6 +26,20 @@ schedule (see `.github/workflows/screener.yml`, every 4 hours) or by hand.
 State lives in `.screener/live/journal.sqlite3` (private; not committed).
 Serve or share only `.screener/live/public/`.
 
+## Agent office
+
+```bash
+python -m screener office          # → http://127.0.0.1:8765 (localhost only)
+```
+
+A live view of the pipeline: Feed, Engine, Charts, Analyst and Publisher work at their desks as a
+live scan runs, and a calendar (press `C`) shows every report run from `history/`. RUN starts a live
+scan; reports (Telegram + git push) stay on the command line. Page: `screener/office.html`; server: `screener/office.py`.
+
+A read-only copy is published on GitHub Pages at `docs/office/` (linked from the dashboard). It
+replays the newest report run and shows the same calendar. Each report run refreshes it, together
+with `docs/index.html` and `docs/latest.json`, in the same commit as `history/`.
+
 ## Configure
 
 Edit `screener.json`: watchlist, strategy thresholds and paper-trading budget.
@@ -57,3 +71,39 @@ Optional Telegram alerts (`python -m screener once --notify`): set
 Extracted from the `market-pivot-watch` repository; the helpers in
 `screener/shared.py` were copied from its `pivot_watch` package so this folder
 runs on its own.
+
+## Review reporting accuracy locally
+
+```bash
+python -m screener report --preview-history history --out .screener/report-review
+python -m http.server 8766 --bind 127.0.0.1 --directory .screener/report-review
+```
+
+Open http://127.0.0.1:8766/ to compare original reads with verified summaries.
+Filter by asset, or add `--market crypto` / `--symbols XAUUSD,XAGUSD` to the
+preview command. This path makes no API calls, sends no messages, writes no
+live state, and never commits or rewrites the source history. Legacy Markdown
+prices remain rounded; missing quotes, candle paths and precision are marked
+unavailable, not reconstructed from AI prose. This is a reporting review, not
+a historical strategy replay or profitability test.
+
+New reports separate strategy status, directional bias, conditional plans and
+engine-assessed entry levels. Only `ENTRY_ELIGIBLE` with current matched evidence
+is described as an eligible entry, and never as an executed trade. This reporting
+check does not alter the engine or its trading rules.
+
+When `DEEPSEEK_API_KEY` is set, the model selects optional fact IDs from a verified
+catalogue; mandatory status and evidence notices cannot be omitted. Free-form
+model prose and legacy cached reads are not displayed as current analysis.
+Malformed responses, unavailable AI, dry runs and unmatched cached reads use a
+labelled deterministic summary. Repeated inputs are labelled as repeats, not
+fresh confirmation. Gap disappearance is not treated as a fill; a recorded later
+candle can establish a boundary touch only.
+
+New history entries include a `.json` evidence sidecar with the raw strategy
+result, full-precision price/quote, source, timestamps, setup/hourly candles,
+gap events and read mode. Existing Markdown history is left untouched.
+
+`report --dry-run` still fetches market data but does not call the AI or send
+reports. The normal `report` command retains its existing send and history
+commit/push behavior; use `--preview-history` for local review without either.

@@ -3,7 +3,7 @@ from copy import deepcopy
 from statistics import mean, median
 import math
 
-from .shared import DataError, bar_fingerprint
+from .shared import DataError, bar_fingerprint, fingerprint
 
 DEFAULTS = dict(lookback=20, volume_ratio=1.5, breakout_atr=.1,
                 compression_ratio=.8, developing_atr=.5, retest_band_atr=.2,
@@ -112,6 +112,12 @@ def plan(result, state, settings):
                 plan_rr=sign*(target-level)/risk if risk > 0 else None)
 
 
+def _digests(bar):
+    # Journals saved before close/volume were excluded used whole-bar hashes; an exact legacy
+    # match is stricter, so it is accepted and the state is re-saved in the new format.
+    return (bar_fingerprint(bar), fingerprint(bar))
+
+
 def evaluate(bundle, saved, settings, now):
     setup, hourly = bundle['setup'], bundle['hourly']
     for bars in (setup, hourly):
@@ -124,12 +130,12 @@ def evaluate(bundle, saved, settings, now):
     if saved:
         for name, bars, key in (('setup', setup, 'setup_end'), ('hour', hourly, 'hour_end')):
             anchor = next((b for b in bars if b['end'] == saved[key]), None)
-            if anchor is None or bar_fingerprint(anchor) != saved[name+'_anchor']:
+            if anchor is None or saved[name+'_anchor'] not in _digests(anchor):
                 raise DataError('Missing/revised anchor; explicit rebaseline required')
         if saved['status'] in ACTIVE:
             for name,bars in (('setup_evidence',setup),('hour_evidence',hourly)):
-                indexed = {b['end']:bar_fingerprint(b) for b in bars}
-                if any(indexed.get(t) != digest for t,digest in saved.get(name,[])):
+                indexed = {b['end']:_digests(b) for b in bars}
+                if any(digest not in indexed.get(t,()) for t,digest in saved.get(name,[])):
                     raise DataError('Missing/revised setup evidence; explicit rebaseline required')
     events = []
 

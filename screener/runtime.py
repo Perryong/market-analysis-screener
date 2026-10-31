@@ -9,7 +9,7 @@ import sqlite3
 import time
 
 from .shared import json_text
-from .shared import DataError, fingerprint
+from .shared import DataError, fingerprint, progress
 from .shared import send
 from . import engine, feeds
 
@@ -156,6 +156,7 @@ def process(store, bundle, settings, paper, now):
                              (fingerprint(ev),ev['at'],json_text(ev)))
         store.put('signal:'+key,state)
         store.put('result:'+key,result)
+    progress('engine','evaluate',bundle['symbol'],status=result.get('status'))
     return result
 
 
@@ -201,6 +202,7 @@ def scan(store, config, now, scheduled=False, only=None):
                     any(t['key']==key and t['status']=='OPEN' for t in store.trades())):
                     continue
                 try:
+                    progress('feed','fetch',symbol,market=market)
                     bundle = data.stock(symbol) if market=='stocks' else (data.crypto(symbol) if market=='crypto' else data.metal(symbol))
                     bundle['regime'] = context
                     bundle['benchmark'] = benchmark
@@ -216,11 +218,13 @@ def scan(store, config, now, scheduled=False, only=None):
                     store.put('result:'+key,dict(symbol=symbol,market=market,status='DATA_UNAVAILABLE',
                               regime=context,reasons=[reason],checked_at=now,score=0))
                     errors.append(key+': '+reason)
+                    progress('feed','failed',symbol,market=market,reason=reason)
             store.put('job:'+market,dict(attempt=now,done=last.get('done',0) if failed else due or now,
                       full_done=full_due if full_scan and not failed else last.get('full_done',0)))
         except (DataError,KeyError,TypeError,ValueError,IndexError) as exc:
             reason = str(exc) if isinstance(exc,DataError) else 'Provider schema invalid'
             errors.append(market+': '+reason)
+            progress('feed','market_failed',None,market=market,reason=reason)
             for symbol in config[market]['symbols']:
                 store.put('result:'+market+':'+symbol,dict(symbol=symbol,market=market,status='DATA_UNAVAILABLE',
                           regime='UNKNOWN',reasons=[reason],checked_at=now,score=0))

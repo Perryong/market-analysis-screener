@@ -4,21 +4,17 @@ Each report run writes one <timestamp>.md + <timestamp>.png per symbol under
 history/<SYM>/, then git add/commit/push the whole history/ tree (best-effort —
 a git failure never blocks the Telegram send). Read-only market data.
 """
+import shutil
 import subprocess
+import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from .reporting import number as _fmt
+from .shared import progress
 
 SGT = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parent.parent  # repo root
 HISTORY = ROOT / "history"
-
-
-def _fmt(v):
-    if v is None:
-        return "—"
-    if abs(v) >= 1:
-        return f"{v:,.2f}"
-    return f"{v:,.4f}"
 
 
 def _fvg_text(fvgs):
@@ -29,11 +25,14 @@ def _fvg_text(fvgs):
 
 def write(symbol, fields, png, now):
     """Write history/<SYM>/<stamp>.md (+ .png) and return the md path."""
+    progress('publisher','archive',symbol)
     ts = datetime.fromtimestamp(now, SGT)
     stamp = ts.strftime("%Y-%m-%d_%H%M%S")
     d = HISTORY / symbol
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{stamp}.png").write_bytes(png)
+    if fields.get('snapshot') is not None:
+        (d / f'{stamp}.json').write_text(json.dumps(fields['snapshot'], indent=2, allow_nan=False), encoding='utf-8')
     trend = "↑ (up)" if fields["trend_up"] else "↓ (down)"
     lines = [
         f"# {symbol} · {ts.strftime('%Y-%m-%d %H:%M:%S')} +08",
@@ -50,6 +49,8 @@ def write(symbol, fields, png, now):
         f"- 1H closed: {fields['closed_open']} → {fields['closed_close']} ({fields['chg']:+.2f}%)",
         f"- Open FVG: {_fvg_text(fields['fvgs_near'])}",
         f"- Setup: {fields['setup_txt']}",
+        f"- Evidence: {fields.get('data_note', 'Unavailable')}",
+        f"- Read mode: {fields.get('read_mode', 'Legacy unvalidated read')}",
         f"- Last completed: 1H {fields['last_1h']} · {fields['tf']} {fields['last_tf']}",
         "",
         f"![Chart]({stamp}.png)",
@@ -57,22 +58,51 @@ def write(symbol, fields, png, now):
     ]
     if fields["prev_read"]:
         lines += ["## Previous read", "", fields["prev_read"], ""]
-    lines += ["## AI read", "", fields["ai_read"] or "—", ""]
+    lines += ["## Verified read", "", fields["ai_read"] or "—", ""]
+    if fields.get('snapshot') is not None:
+        lines += [f'[Evidence snapshot]({stamp}.json)', '']
     lines += ["", "*Analysis only · No orders placed*", "", fields["tv_link"], ""]
     md_path = d / f"{stamp}.md"
     md_path.write_text("\n".join(lines), encoding="utf-8")
     return md_path
 
 
+PUBLIC = ROOT / ".screener" / "live" / "public"
+SITE = ROOT / "docs"  # GitHub Pages source
+
+
+def publish_site(public=PUBLIC, site=SITE, history=HISTORY):
+    """Copy the latest dashboard to docs/ and rebuild the read-only office there. Returns paths to stage."""
+    from .office import export
+    paths = []
+    for name in ("index.html", "latest.json"):
+        if (public / name).exists():
+            shutil.copyfile(public / name, site / name)
+            paths.append(f"docs/{name}")
+    export(site / "office", history)
+    return paths + ["docs/office/"]
+
+
 def git_commit(now, count):
-    """Stage, commit and push history/. Returns an error string, or None on success/nothing-new."""
+    """Stage, commit and push history/ (+ the Pages site). Returns an error string, or None on success/nothing-new."""
     msg = f"history: {datetime.fromtimestamp(now, SGT):%Y-%m-%d %H:%M} ({count} symbols)"
     try:
-        subprocess.run(["git", "add", "history/"], cwd=ROOT, check=True, capture_output=True, timeout=60)
+        try:
+            site = publish_site(PUBLIC, SITE, HISTORY)
+        except (OSError, ValueError) as exc:  # the site is best-effort; history still commits
+            site, msg = [], msg + f" · site not updated: {exc}"
+        subprocess.run(["git", "add", "history/", *site], cwd=ROOT, check=True, capture_output=True, timeout=60)
         staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT, capture_output=True, timeout=30)
         if staged.returncode == 0:
             return None  # nothing new staged
         subprocess.run(["git", "commit", "-q", "-m", msg], cwd=ROOT, check=True, capture_output=True, timeout=60)
+        # Catch up with commits pushed from elsewhere (code merges) so the push is never rejected.
+        # The commit only holds new history files and generated docs/, so on overlap keep ours (-X theirs).
+        pull = subprocess.run(["git", "pull", "-q", "--rebase", "--autostash", "-X", "theirs", "origin", "main"],
+                              cwd=ROOT, capture_output=True, text=True, timeout=120)
+        if pull.returncode:
+            subprocess.run(["git", "rebase", "--abort"], cwd=ROOT, capture_output=True, timeout=60)
+            return f"git history: pull failed, committed locally only: {pull.stderr.strip()[:200]}"
         subprocess.run(["git", "push", "-q", "origin", "main"], cwd=ROOT, check=True, capture_output=True, timeout=120)
         return None
     except Exception as exc:
