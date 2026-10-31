@@ -14,9 +14,7 @@ def e(value):
 def number(value):
     if value is None:
         return '—'
-    # At least four significant digits for sub-unit prices such as PEPEUSDT.
-    places = max(4, 3-math.floor(math.log10(abs(value)))) if value else 4
-    return f'{value:,.{places}f}'.rstrip('0').rstrip('.')
+    return f'{value:,.2f}'
 
 
 def level(r, key):

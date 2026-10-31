@@ -17,7 +17,7 @@ def evidence_signature(snapshot):
 def number(value):
     if value is None:
         return '—'
-    return format(Decimal(str(value)), ',f')
+    return f"{value:,.2f}"
 
 
 def finite(value):
