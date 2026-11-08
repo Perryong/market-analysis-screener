@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": 1794154076.7412472,
+  "generated_at": 1794168476.7442136,
   "mode": "live",
   "results": [
     {
@@ -10,7 +10,7 @@
       "status": "RETESTED",
       "side": "LONG",
       "score": 12.1,
-      "checked_at": 1794154099.4950495,
+      "checked_at": 1794168499.65713,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [
@@ -407,7 +407,7 @@
       "status": "CONFIRMED",
       "side": "SHORT",
       "score": 20.2,
-      "checked_at": 1794154081.3453188,
+      "checked_at": 1794168481.4598725,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -798,7 +798,7 @@
       "status": "CONFIRMED",
       "side": "SHORT",
       "score": 18.0,
-      "checked_at": 1794154097.3140378,
+      "checked_at": 1794168497.4259055,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -1189,7 +1189,7 @@
       "status": "WATCHING",
       "side": "LONG",
       "score": 9.5,
-      "checked_at": 1794154083.662534,
+      "checked_at": 1794168483.780415,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -1576,17 +1576,17 @@
       "regime": "NEUTRAL",
       "status": "INVALIDATED",
       "side": "LONG",
-      "score": 19.2,
-      "checked_at": 1794154108.7597935,
-      "setup_close": 1794153600.0,
-      "hourly_close": 1794153600.0,
+      "score": 23.6,
+      "checked_at": 1794168508.0444403,
+      "setup_close": 1794168000.0,
+      "hourly_close": 1794168000.0,
       "reasons": [],
       "upper": 96.0,
       "lower": 89.86,
-      "atr": 0.9485714285714276,
-      "volume_ratio": 0.7089263246844355,
-      "compression": 0.5968911917098442,
-      "close": 89.71,
+      "atr": 0.9299999999999987,
+      "volume_ratio": 1.1551536931009996,
+      "compression": 0.5992353145637824,
+      "close": 89.6,
       "level": 96.0,
       "trigger": 1793808000.0,
       "target": 102.14,
@@ -1597,20 +1597,11 @@
       "plan_rr": 1.8859976304357366,
       "source": "Binance spot / UTC",
       "quote": {
-        "price": 89.75,
-        "time": 1794154107.715
+        "price": 89.37,
+        "time": 1794168507.78
       },
       "quote_error": null,
       "candles": [
-        {
-          "start": 1793577600.0,
-          "end": 1793592000.0,
-          "open": 94.54,
-          "high": 95.95,
-          "low": 93.83,
-          "close": 95.59,
-          "volume": 305023.085
-        },
         {
           "start": 1793592000.0,
           "end": 1793606400.0,
@@ -1961,6 +1952,15 @@
           "low": 89.09,
           "close": 89.71,
           "volume": 114007.571
+        },
+        {
+          "start": 1794153600.0,
+          "end": 1794168000.0,
+          "open": 89.72,
+          "high": 90.01,
+          "low": 88.9,
+          "close": 89.6,
+          "volume": 164338.624
         }
       ]
     },
@@ -1970,17 +1970,17 @@
       "regime": "NEUTRAL",
       "status": "INVALIDATED",
       "side": "SHORT",
-      "score": 18.9,
-      "checked_at": 1794154105.9898815,
-      "setup_close": 1794153600.0,
-      "hourly_close": 1794153600.0,
+      "score": 18.2,
+      "checked_at": 1794168506.2628574,
+      "setup_close": 1794168000.0,
+      "hourly_close": 1794168000.0,
       "reasons": [],
       "upper": 717.75,
       "lower": 691.66,
-      "atr": 4.5,
-      "volume_ratio": 0.7599874284979824,
-      "compression": 0.624652455977756,
-      "close": 698.69,
+      "atr": 4.267857142857134,
+      "volume_ratio": 0.7213250511680025,
+      "compression": 0.6333307166967542,
+      "close": 697.96,
       "level": 691.66,
       "trigger": 1793764800.0,
       "target": 665.5699999999999,
@@ -1991,20 +1991,11 @@
       "plan_rr": 0.4248844613450062,
       "source": "Binance spot / UTC",
       "quote": {
-        "price": 698.47,
-        "time": 1794154105.078
+        "price": 697.59,
+        "time": 1794168506.098
       },
       "quote_error": null,
       "candles": [
-        {
-          "start": 1793577600.0,
-          "end": 1793592000.0,
-          "open": 712.7,
-          "high": 716.0,
-          "low": 710.0,
-          "close": 714.39,
-          "volume": 19119.217
-        },
         {
           "start": 1793592000.0,
           "end": 1793606400.0,
@@ -2355,6 +2346,15 @@
           "low": 696.21,
           "close": 698.69,
           "volume": 8313.523
+        },
+        {
+          "start": 1794153600.0,
+          "end": 1794168000.0,
+          "open": 698.7,
+          "high": 699.0,
+          "low": 695.51,
+          "close": 697.96,
+          "volume": 7570.191
         }
       ]
     },
@@ -2365,7 +2365,7 @@
       "status": "INVALIDATED",
       "side": "SHORT",
       "score": 11.4,
-      "checked_at": 1794154090.6085696,
+      "checked_at": 1794168490.6917903,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -2759,7 +2759,7 @@
       "status": "INVALIDATED",
       "side": "LONG",
       "score": 10.9,
-      "checked_at": 1794154086.0882888,
+      "checked_at": 1794168486.1557977,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -3150,7 +3150,7 @@
       "status": "INVALIDATED",
       "side": "SHORT",
       "score": 9.0,
-      "checked_at": 1794154095.0814629,
+      "checked_at": 1794168495.174503,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -3544,7 +3544,7 @@
       "status": "INVALIDATED",
       "side": "LONG",
       "score": 8.8,
-      "checked_at": 1794154111.02076,
+      "checked_at": 1794168510.8339088,
       "setup_close": 1794002400.0,
       "hourly_close": 1794002400.0,
       "reasons": [],
@@ -3937,17 +3937,17 @@
       "regime": "NEUTRAL",
       "status": "EXPIRED",
       "side": "LONG",
-      "score": 22.4,
-      "checked_at": 1794154104.573846,
-      "setup_close": 1794153600.0,
-      "hourly_close": 1794153600.0,
+      "score": 23.8,
+      "checked_at": 1794168504.874042,
+      "setup_close": 1794168000.0,
+      "hourly_close": 1794168000.0,
       "reasons": [],
       "upper": 2339.27,
       "lower": 2226.44,
-      "atr": 17.553571428571395,
-      "volume_ratio": 0.45655284154962017,
-      "compression": 0.4061546944190733,
-      "close": 2242.02,
+      "atr": 16.65214285714283,
+      "volume_ratio": 0.5964161913792487,
+      "compression": 0.40641124539298557,
+      "close": 2232.42,
       "level": 2339.27,
       "trigger": 1793808000.0,
       "target": 2452.1,
@@ -3958,20 +3958,11 @@
       "plan_rr": null,
       "source": "Binance spot / UTC",
       "quote": {
-        "price": 2240.72,
-        "time": 1794154104.006
+        "price": 2228.17,
+        "time": 1794168504.003
       },
       "quote_error": null,
       "candles": [
-        {
-          "start": 1793577600.0,
-          "end": 1793592000.0,
-          "open": 2275.3,
-          "high": 2317.84,
-          "low": 2268.47,
-          "close": 2309.25,
-          "volume": 62335.9657
-        },
         {
           "start": 1793592000.0,
           "end": 1793606400.0,
@@ -4322,6 +4313,15 @@
           "low": 2235.66,
           "close": 2242.02,
           "volume": 9828.7326
+        },
+        {
+          "start": 1794153600.0,
+          "end": 1794168000.0,
+          "open": 2242.03,
+          "high": 2243.56,
+          "low": 2225.0,
+          "close": 2232.42,
+          "volume": 9767.1279
         }
       ]
     },
@@ -4331,17 +4331,17 @@
       "regime": "NEUTRAL",
       "status": "EXPIRED",
       "side": "LONG",
-      "score": 22.3,
-      "checked_at": 1794154103.1386907,
-      "setup_close": 1794153600.0,
-      "hourly_close": 1794153600.0,
+      "score": 23.1,
+      "checked_at": 1794168503.4597497,
+      "setup_close": 1794168000.0,
+      "hourly_close": 1794168000.0,
       "reasons": [],
       "upper": 78878.01,
       "lower": 75736.38,
-      "atr": 481.06142857142964,
-      "volume_ratio": 0.301664936470191,
-      "compression": 0.3581140651379729,
-      "close": 76073.74,
+      "atr": 458.89428571428704,
+      "volume_ratio": 0.43634116590993743,
+      "compression": 0.37704619462373967,
+      "close": 75929.03,
       "level": 78878.01,
       "trigger": 1793808000.0,
       "target": 82019.63999999998,
@@ -4352,20 +4352,11 @@
       "plan_rr": 11.702117979478388,
       "source": "Binance spot / UTC",
       "quote": {
-        "price": 76068.14,
-        "time": 1794154103.004
+        "price": 75874.03,
+        "time": 1794168503.006
       },
       "quote_error": null,
       "candles": [
-        {
-          "start": 1793577600.0,
-          "end": 1793592000.0,
-          "open": 78354.01,
-          "high": 78878.01,
-          "low": 78044.11,
-          "close": 78634.01,
-          "volume": 1820.55376
-        },
         {
           "start": 1793592000.0,
           "end": 1793606400.0,
@@ -4716,6 +4707,15 @@
           "low": 75894.44,
           "close": 76073.74,
           "volume": 631.70124
+        },
+        {
+          "start": 1794153600.0,
+          "end": 1794168000.0,
+          "open": 76073.75,
+          "high": 76095.32,
+          "low": 75668.0,
+          "close": 75929.03,
+          "volume": 724.04303
         }
       ]
     },
@@ -4725,17 +4725,17 @@
       "regime": "NEUTRAL",
       "status": "EXPIRED",
       "side": "SHORT",
-      "score": 21.2,
-      "checked_at": 1794154107.3675175,
-      "setup_close": 1794153600.0,
-      "hourly_close": 1794153600.0,
+      "score": 21.9,
+      "checked_at": 1794168506.6561317,
+      "setup_close": 1794168000.0,
+      "hourly_close": 1794168000.0,
       "reasons": [],
       "upper": 1.3414,
       "lower": 1.2288,
-      "atr": 0.018235714285714324,
-      "volume_ratio": 0.6972530961921044,
-      "compression": 0.5259515570934263,
-      "close": 1.1563,
+      "atr": 0.01722142857142861,
+      "volume_ratio": 0.6727969447930991,
+      "compression": 0.4940100196035729,
+      "close": 1.152,
       "level": 1.2288,
       "trigger": 1793923200.0,
       "target": 1.1161999999999999,
@@ -4747,20 +4747,11 @@
       "plan_rr": null,
       "source": "Binance spot / UTC",
       "quote": {
-        "price": 1.1554,
-        "time": 1794154107.306
+        "price": 1.1508,
+        "time": 1794168506.299
       },
       "quote_error": null,
       "candles": [
-        {
-          "start": 1793577600.0,
-          "end": 1793592000.0,
-          "open": 1.2508,
-          "high": 1.2646,
-          "low": 1.2423,
-          "close": 1.2616,
-          "volume": 11911578.4
-        },
         {
           "start": 1793592000.0,
           "end": 1793606400.0,
@@ -5111,6 +5102,15 @@
           "low": 1.1539,
           "close": 1.1563,
           "volume": 8116234.1
+        },
+        {
+          "start": 1794153600.0,
+          "end": 1794168000.0,
+          "open": 1.1564,
+          "high": 1.1623,
+          "low": 1.1517,
+          "close": 1.152,
+          "volume": 7831557.2
         }
       ]
     },
@@ -5121,7 +5121,7 @@
       "status": "EXPIRED",
       "side": "LONG",
       "score": 15.2,
-      "checked_at": 1794154101.6388664,
+      "checked_at": 1794168502.0007508,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -5515,7 +5515,7 @@
       "status": "EXPIRED",
       "side": "SHORT",
       "score": 13.1,
-      "checked_at": 1794154088.3323858,
+      "checked_at": 1794168488.4779105,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
@@ -5909,7 +5909,7 @@
       "status": "EXPIRED",
       "side": "SHORT",
       "score": 8.8,
-      "checked_at": 1794154110.2686937,
+      "checked_at": 1794168510.0590599,
       "setup_close": 1794002400.0,
       "hourly_close": 1794002400.0,
       "reasons": [],
@@ -6303,7 +6303,7 @@
       "status": "EXPIRED",
       "side": "SHORT",
       "score": 6.3,
-      "checked_at": 1794154092.827619,
+      "checked_at": 1794168492.92697,
       "setup_close": 1793998800.0,
       "hourly_close": 1793997000.0,
       "reasons": [],
