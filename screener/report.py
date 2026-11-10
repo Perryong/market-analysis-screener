@@ -15,7 +15,7 @@ import time
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 
-from .shared import DataError, progress, send
+from .shared import DataError, progress, broadcast, telegram_recipients
 from .reporting import number as fmt, fact_catalog, verified_read, evidence_notes, gap_events, evidence_signature
 from .report_preview import preview_history
 from .feeds import MarketData
@@ -327,8 +327,7 @@ def analysis_html(f):
 
 def run(config, store, now, dry_run=False, only=None, symbols=None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not dry_run and (not token or not chat):
+    if not dry_run and (not token or not telegram_recipients()):
         raise DataError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
     data = MarketData(config, Cache(store), now)
     headers = {"APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID"), "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY")}
@@ -376,7 +375,7 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
             progress('charts','draw',sym,market=market)
             png = pwchart.render_png(pwchart.svg(sym, bars, r, market, source, now, analysis_html(fields)))
             history.write(sym, fields, png, now)
-            send(token, chat, fields["top"], png)
+            broadcast(token, fields["top"], png)
             sent += 1
         except (DataError, OSError, ValueError, KeyError, TypeError, IndexError) as exc:
             failures.append(f"{sym}: {exc}")
@@ -387,5 +386,5 @@ def run(config, store, now, dry_run=False, only=None, symbols=None):
             summary += "\nSkipped: " + ", ".join(failures)
         if git_err:
             summary += "\n" + git_err
-        send(token, chat, summary, None)
+        broadcast(token, summary)
     return failures

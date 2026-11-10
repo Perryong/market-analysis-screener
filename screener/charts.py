@@ -11,7 +11,7 @@ import os
 import re
 from pathlib import Path
 
-from .shared import DataError, get_json, iso, send, timestamp
+from .shared import DataError, get_json, iso, broadcast, telegram_recipients, timestamp
 from .reporting import number as precise
 from . import pwchart
 from .feeds import MarketData
@@ -281,7 +281,7 @@ def live_prices(config, headers, oanda):
     return out
 
 
-def live_scan(config, store, prices, token, chat, now, buffer=0.1):
+def live_scan(config, store, prices, token, now, buffer=0.1):
     res = results(store)
     pings = []
     for (market, sym), price in prices.items():
@@ -300,9 +300,8 @@ def live_scan(config, store, prices, token, chat, now, buffer=0.1):
     for market, sym, side, price, r in pings:
         arrow = "↑" if side == "LONG" else "↓"
         level = r.get("upper") if side == "LONG" else r.get("lower")
-        send(token, chat,
-             f"PIVOT CROSS {sym} · {arrow} {precise(price)} · pivot {precise(level)} · strategy {r.get('status', 'UNKNOWN')} · price observation, not entry eligibility",
-             None)
+        broadcast(token,
+             f"PIVOT CROSS {sym} · {arrow} {precise(price)} · pivot {precise(level)} · strategy {r.get('status', 'UNKNOWN')} · price observation, not entry eligibility")
     return pings
 
 
@@ -317,8 +316,7 @@ def dashboard_url():
 
 def run(config, store, now):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not token or not chat:
+    if not token or not telegram_recipients():
         raise DataError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
     headers = {
         "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID"),
@@ -330,7 +328,7 @@ def run(config, store, now):
     buffer = config["strategy"].get("breakout_atr", 0.1)
     prices = live_prices(config, headers, oanda_headers)
     try:
-        live_scan(config, store, prices, token, chat, now, buffer)
+        live_scan(config, store, prices, token, now, buffer)
     except (DataError, OSError, ValueError, KeyError, TypeError):
         pass  # live ping is best-effort; charts still run
     picks = select(
@@ -387,11 +385,11 @@ def run(config, store, now):
             failures.append(f"{symbol}: {exc}")
             continue
         label = caption(symbol, tag, sig, last, chart_pct, live)
-        send(token, chat, label, png)
+        broadcast(token, label, png)
     summary = "SCREENER · 1H pivots"
     link = dashboard_url()
     if link:
         summary += "\nDashboard: " + link
     if failures:
         summary += "\nSkipped: " + ", ".join(failures)
-    send(token, chat, summary, None)
+    broadcast(token, summary)

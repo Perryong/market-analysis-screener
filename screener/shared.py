@@ -130,3 +130,29 @@ def send(token, chat, text, photo):
             # No retry: a timed-out POST may already have delivered.
             raise DataError('Telegram delivery could not be confirmed') from None
     raise last
+
+
+def telegram_recipients():
+    """Dedup'd Telegram chat IDs: primary plus any additional recipients."""
+    return list(dict.fromkeys(s.strip() for s in
+        (os.getenv('TELEGRAM_CHAT_ID', '') + ',' + os.getenv('TELEGRAM_ADDITIONAL_CHAT_IDS', '')).split(',')
+        if s.strip()))
+
+
+def broadcast(token, text, photo=None):
+    """Send text (+ optional photo) to every configured recipient, tolerating dead chats."""
+    chats = telegram_recipients()
+    if not token or not chats:
+        raise DataError('Telegram credentials and recipient required')
+    ok = 0
+    errors = []
+    for chat in chats:
+        try:
+            send(token, chat, text, photo)
+            ok += 1
+        except DataError as exc:
+            errors.append(f'{chat}: {exc}')
+    for err in errors:
+        print(f'[telegram] recipient failed: {err}', file=sys.stderr, flush=True)
+    if ok == 0 and errors:
+        raise DataError('Telegram send failed for all recipients: ' + '; '.join(errors))
