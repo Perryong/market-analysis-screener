@@ -120,7 +120,7 @@ def send(token, chat, text, photo):
             except Exception:
                 pass
             last = DataError(f'Telegram HTTP {exc.code}: {detail}')
-            if exc.code in (400, 429) and attempt < 2:
+            if exc.code == 429 and attempt < 2:
                 time.sleep(2 * (attempt + 1))
                 continue
             raise last from None
